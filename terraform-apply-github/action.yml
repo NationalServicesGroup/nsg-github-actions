@@ -1,0 +1,59 @@
+name: "Terraform Apply for GitHub Provider"
+description: "Runs terraform apply for repos using GitHub provider with optional GCS backend"
+
+inputs:
+  working_directory:
+    description: "Working directory for Terraform"
+    required: false
+    default: "."
+  tf_version:
+    description: "Terraform version"
+    required: false
+    default: "1.12.2"
+  gcp_service_account_key:
+    description: "GCP service account key (only needed if using GCS backend)"
+    required: false
+  github_token:
+    description: "GitHub token for Terraform GitHub provider"
+    required: true
+  github_owner:
+    description: "GitHub organization/owner name"
+    required: true
+  plan_file:
+    description: "Path to terraform plan file"
+    required: false
+    default: "tfplan"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.tf_version }}
+
+    - name: Authenticate to Google Cloud
+      if: ${{ inputs.gcp_service_account_key != '' }}
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ inputs.gcp_service_account_key }}
+
+    - name: Set up Cloud SDK
+      if: ${{ inputs.gcp_service_account_key != '' }}
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Terraform Init
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform init
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_OWNER: ${{ inputs.github_owner }}
+
+    - name: Terraform Apply
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform apply -auto-approve ${{ inputs.plan_file }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_OWNER: ${{ inputs.github_owner }}

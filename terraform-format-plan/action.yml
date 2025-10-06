@@ -1,0 +1,63 @@
+name: "Format Terraform Plan"
+description: "Formats and truncates terraform plan for GitHub outputs and summaries"
+
+inputs:
+  plan_file:
+    description: "Path to the plan output text file"
+    required: true
+  max_length:
+    description: "Maximum length before truncation"
+    required: false
+    default: "60000"
+
+outputs:
+  plan_formatted:
+    description: "Formatted and truncated plan output"
+    value: ${{ steps.format.outputs.plan_formatted }}
+  plan_truncated:
+    description: "Whether the plan was truncated"
+    value: ${{ steps.format.outputs.was_truncated }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Format Plan
+      id: format
+      shell: bash
+      run: |
+        PLAN_CONTENT="$(cat ${{ inputs.plan_file }})"
+        PLAN_LENGTH=${#PLAN_CONTENT}
+        MAX_LENGTH=${{ inputs.max_length }}
+
+        if [ $PLAN_LENGTH -gt $MAX_LENGTH ]; then
+          PLAN_TRUNCATED="${PLAN_CONTENT:0:$MAX_LENGTH}"
+          echo "was_truncated=true" >> $GITHUB_OUTPUT
+
+          {
+            echo 'plan_formatted<<PLAN_EOF'
+            echo "$PLAN_TRUNCATED"
+            echo ""
+            echo "!!!!!! PLAN WAS TRUNCATED !!!!!!"
+            echo "Original length: $PLAN_LENGTH characters"
+            echo "View full plan in workflow logs"
+            echo 'PLAN_EOF'
+          } >> $GITHUB_OUTPUT
+        else
+          echo "was_truncated=false" >> $GITHUB_OUTPUT
+          {
+            echo 'plan_formatted<<PLAN_EOF'
+            echo "$PLAN_CONTENT"
+            echo 'PLAN_EOF'
+          } >> $GITHUB_OUTPUT
+        fi
+
+        # Add to step summary
+        echo "## Terraform Plan 📖" >> $GITHUB_STEP_SUMMARY
+        echo '```hcl' >> $GITHUB_STEP_SUMMARY
+        cat ${{ inputs.plan_file }} >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ steps.format.outputs.was_truncated }}" == "true" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Plan output was truncated in artifacts. Full plan shown above." >> $GITHUB_STEP_SUMMARY
+        fi

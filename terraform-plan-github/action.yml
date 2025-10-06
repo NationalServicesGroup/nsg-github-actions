@@ -1,0 +1,87 @@
+name: "Terraform Plan for GitHub Provider"
+description: "Runs complete terraform plan workflow for repos using GitHub provider with optional GCS backend"
+
+inputs:
+  working_directory:
+    description: "Working directory for Terraform"
+    required: false
+    default: "."
+  tf_version:
+    description: "Terraform version"
+    required: false
+    default: "1.12.2"
+  gcp_service_account_key:
+    description: "GCP service account key (only needed if using GCS backend)"
+    required: false
+  github_token:
+    description: "GitHub token for Terraform GitHub provider"
+    required: true
+  github_owner:
+    description: "GitHub organization/owner name"
+    required: true
+
+outputs:
+  plan_output:
+    description: "Terraform plan output"
+    value: ${{ steps.plan.outputs.stdout }}
+  has_changes:
+    description: "Whether the plan has changes"
+    value: ${{ steps.check-changes.outputs.has_changes }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.tf_version }}
+
+    - name: Authenticate to Google Cloud
+      if: ${{ inputs.gcp_service_account_key != '' }}
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ inputs.gcp_service_account_key }}
+
+    - name: Set up Cloud SDK
+      if: ${{ inputs.gcp_service_account_key != '' }}
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Terraform Format Check
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform fmt -check
+      continue-on-error: true
+
+    - name: Terraform Init
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform init
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_OWNER: ${{ inputs.github_owner }}
+
+    - name: Terraform Validate
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform validate
+
+    - name: Terraform Plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        terraform plan -input=false -out=tfplan -no-color | tee plan_output.txt
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_OWNER: ${{ inputs.github_owner }}
+
+    - name: Check for changes
+      id: check-changes
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        if grep -q "No changes. Your infrastructure matches the configuration." plan_output.txt; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi

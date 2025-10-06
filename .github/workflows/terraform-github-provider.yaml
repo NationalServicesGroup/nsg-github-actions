@@ -1,5 +1,5 @@
-name: Terraform GitHub Provider
-run-name: Terraform Plan and Apply (GitHub Provider)
+name: Terraform with Approval
+run-name: Terraform Plan and Apply with Manual Approval
 
 on:
   workflow_call:
@@ -13,7 +13,7 @@ on:
         description: "Terraform version"
         required: false
         type: string
-        default: "1.10.0"
+        default: "1.12.2"
       approvers:
         description: "Comma-separated list of GitHub usernames who can approve"
         required: true
@@ -37,7 +37,7 @@ on:
         required: true
       gcp_service_account_key:
         description: "GCP service account key (only needed if using GCS backend)"
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -49,134 +49,37 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     outputs:
-      terraform_plan: ${{ steps.terraform-plan.outputs.tfplan_human_readable_truncated }}
-      has_changes: ${{ steps.terraform-plan.outputs.has_changes }}
+      has_changes: ${{ steps.plan.outputs.has_changes }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Run Terraform Plan
+        id: plan
+        uses: NationalServicesGroup/nsg-github-actions/terraform-plan-github@main
         with:
-          terraform_version: ${{ inputs.tf_version }}
+          working_directory: ${{ inputs.working_directory }}
+          tf_version: ${{ inputs.tf_version }}
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          github_token: ${{ secrets.pat_token }}
+          github_owner: ${{ secrets.github_owner }}
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Format and Comment Plan
+        uses: NationalServicesGroup/nsg-github-actions/terraform-plan-comment@main
         with:
-          credentials_json: ${{ secrets.gcp_service_account_key }}
+          plan_file: ${{ inputs.working_directory }}/plan_output.txt
+          working_directory: ${{ inputs.working_directory }}
+          github_token: ${{ secrets.pat_token }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Terraform Format Check
-        working-directory: ${{ inputs.working_directory }}
-        run: terraform fmt -check
-        continue-on-error: true
-
-      - name: Terraform Init
-        working-directory: ${{ inputs.working_directory }}
-        run: terraform init
-        env:
-          GITHUB_TOKEN: ${{ secrets.pat_token }}
-          GITHUB_OWNER: ${{ secrets.github_owner }}
-
-      - name: Terraform Validate
-        working-directory: ${{ inputs.working_directory }}
-        run: terraform validate
-
-      - name: Terraform Plan
-        id: terraform-plan
-        working-directory: ${{ inputs.working_directory }}
-        run: |
-          terraform plan -input=false -out=tfplan
-
-          # Save the plan output to a file
-          terraform show -no-color tfplan > plan_output.txt
-
-          # Read plan into variable
-          tfplan_human_readable="$(cat plan_output.txt)"
-          # GitHub has a limit of 64 KB (65,536 characters)
-          tfplan_human_readable_truncated="${tfplan_human_readable:0:60000}"
-
-          # Debug output
-          echo "DEBUG: Plan length: ${#tfplan_human_readable}"
-          echo "DEBUG: Truncated length: ${#tfplan_human_readable_truncated}"
-
-          # Check if plan has no changes
-          if echo "$tfplan_human_readable" | grep -q "No changes. Your infrastructure matches the configuration."; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-          else
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          fi
-
-          # Save multi-line tfplan as GitHub output
-          {
-            echo 'tfplan_human_readable_truncated<<PLAN_DELIMITER_END'
-            echo "$tfplan_human_readable_truncated"
-            if [ ${#tfplan_human_readable} -gt 60000 ]; then
-              echo -e "\n!!!!!! TERRAFORM PLAN WAS TRUNCATED !!!!!!"
-              echo -e "Find complete plan in workflow execution logs."
-            fi
-            echo 'PLAN_DELIMITER_END'
-          } >> $GITHUB_OUTPUT
-
-          # Add to step summary
-          echo "## Terraform Plan 📖" >> $GITHUB_STEP_SUMMARY
-          echo '```hcl' >> $GITHUB_STEP_SUMMARY
-          echo "$tfplan_human_readable" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-        env:
-          GITHUB_TOKEN: ${{ secrets.pat_token }}
-          GITHUB_OWNER: ${{ secrets.github_owner }}
-
-      - name: Upload Terraform Plan
+      - name: Upload Plan Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan
+          name: terraform-plan
           path: |
             ${{ inputs.working_directory }}/tfplan
             ${{ inputs.working_directory }}/plan_output.txt
           retention-days: 1
-
-      - name: Comment PR with Plan
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const plan = `${{ steps.terraform-plan.outputs.tfplan_human_readable_truncated }}`;
-            const commitSha = context.payload.pull_request.head.sha;
-            const commitUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}/commits/${commitSha}`;
-            const body = `## Terraform Plan 📖\n\nCommit: [${commitSha.substring(0, 7)}](${commitUrl})\n\n\`\`\`hcl\n${plan}\n\`\`\``;
-
-            // Find existing terraform plan comment
-            const comments = await github.rest.issues.listComments({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-
-            const existingComment = comments.data.find(comment =>
-              comment.body.includes('## Terraform Plan 📖')
-            );
-
-            if (existingComment) {
-              // Update existing comment
-              await github.rest.issues.updateComment({
-                comment_id: existingComment.id,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-            } else {
-              // Create new comment
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-            }
 
   manual-approval:
     name: Manual Approval
@@ -185,42 +88,41 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.terraform-plan.outputs.has_changes == 'true'
 
     steps:
-      - name: Download Terraform Plan
+      - name: Download Plan
         uses: actions/download-artifact@v4
         with:
-          name: tfplan
+          name: terraform-plan
 
-      - name: Read Plan from File
-        id: read-plan
-        run: |
-          PLAN_CONTENT="$(cat plan_output.txt)"
-          # Truncate for GitHub issue size limits
-          PLAN_TRUNCATED="${PLAN_CONTENT:0:60000}"
+      - name: Format Plan for Approval
+        id: format-plan
+        uses: NationalServicesGroup/nsg-github-actions/terraform-format-plan@main
+        with:
+          plan_file: plan_output.txt
 
-          # Save to output using file method
-          echo "$PLAN_TRUNCATED" > plan_for_issue.txt
-          echo "plan_content<<PLAN_END" >> $GITHUB_OUTPUT
-          cat plan_for_issue.txt >> $GITHUB_OUTPUT
-          echo "PLAN_END" >> $GITHUB_OUTPUT
-
-      - name: Manual Approval
+      - name: Request Manual Approval
         uses: trstringer/manual-approval@v1
         with:
           secret: ${{ secrets.pat_token }}
           approvers: ${{ inputs.approvers }}
           minimum-approvals: ${{ inputs.minimum_approvals }}
-          issue-title: "Terraform Apply Approval for ${{ github.repository }}"
+          issue-title: "🚀 Terraform Apply Approval for ${{ github.repository }}"
           issue-body: |
-            Please review the terraform plan and approve the deployment:
+            ## Terraform Apply Approval Required
 
             **Repository:** ${{ github.repository }}
             **Branch:** ${{ github.ref_name }}
             **Workflow:** ${{ github.workflow }}
             **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
+            ### Proposed Changes
+
             ```hcl
-            ${{ steps.read-plan.outputs.plan_content }}
+            ${{ steps.format-plan.outputs.plan_formatted }}
             ```
+
+            ---
+
+            **Approve this issue** to proceed with `terraform apply`.
           exclude-workflow-initiator-as-approver: false
           timeout-minutes: ${{ inputs.approval_timeout_minutes }}
 
@@ -234,35 +136,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ inputs.tf_version }}
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.gcp_service_account_key }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Terraform Init
-        working-directory: ${{ inputs.working_directory }}
-        run: terraform init
-        env:
-          GITHUB_TOKEN: ${{ secrets.pat_token }}
-          GITHUB_OWNER: ${{ secrets.github_owner }}
-
-      - name: Download Terraform Plan
+      - name: Download Plan
         uses: actions/download-artifact@v4
         with:
-          name: tfplan
+          name: terraform-plan
           path: ${{ inputs.working_directory }}
 
-      - name: Terraform Apply
-        working-directory: ${{ inputs.working_directory }}
-        run: terraform apply -auto-approve tfplan
-        env:
-          GITHUB_TOKEN: ${{ secrets.pat_token }}
-          GITHUB_OWNER: ${{ secrets.github_owner }}
+      - name: Run Terraform Apply
+        uses: NationalServicesGroup/nsg-github-actions/terraform-apply-github@main
+        with:
+          working_directory: ${{ inputs.working_directory }}
+          tf_version: ${{ inputs.tf_version }}
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          github_token: ${{ secrets.pat_token }}
+          github_owner: ${{ secrets.github_owner }}
+          plan_file: "tfplan"
