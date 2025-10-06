@@ -37,7 +37,7 @@ on:
         required: true
       gcp_service_account_key:
         description: "GCP service account key (only needed if using GCS backend)"
-        required: false
+        required: true
 
 permissions:
   contents: read
