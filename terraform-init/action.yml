@@ -1,0 +1,46 @@
+name: "Terraform Init for Environment"
+description: "Initializes Terraform with environment-specific backend and variables"
+
+inputs:
+  environment:
+    required: true
+    description: "Environment name (e.g., stage, hgeprod, dev)"
+  working_directory:
+    description: "Working directory for Terraform"
+    default: "."
+
+runs:
+  using: "composite"
+  steps:
+    - name: Initialize Terraform Backend
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        echo "Initializing backend for environment: ${{ inputs.environment }}"
+
+        # Clean up existing terraform state
+        rm -rf .terraform
+        rm -f backend.tf
+        rm -f terraform.tfvars
+
+        # Copy environment-specific backend and variables
+        if [ -f "backends/backend.${{ inputs.environment }}.tf" ]; then
+          cp backends/backend.${{ inputs.environment }}.tf backend.tf
+          echo "✓ Copied backend configuration for ${{ inputs.environment }}"
+        else
+          echo "ERROR: Backend file backends/backend.${{ inputs.environment }}.tf not found!"
+          exit 1
+        fi
+
+        if [ -f "variables/${{ inputs.environment }}.tfvars" ]; then
+          cp variables/${{ inputs.environment }}.tfvars terraform.tfvars
+          echo "✓ Copied variables for ${{ inputs.environment }}"
+        else
+          echo "ERROR: Variables file variables/${{ inputs.environment }}.tfvars not found!"
+          exit 1
+        fi
+
+        # Initialize Terraform
+        terraform init
+
+        echo "✓ Terraform initialization complete for ${{ inputs.environment }}"

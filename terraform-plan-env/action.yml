@@ -1,0 +1,38 @@
+name: "Terraform Plan for Environment"
+description: "Runs terraform plan for a specific environment"
+
+inputs:
+  environment:
+    required: true
+    description: "Environment name (e.g., stage, hgeprod, dev)"
+  working_directory:
+    description: "Working directory for Terraform"
+    default: "."
+  gcp_service_account_key:
+    required: true
+    description: "Base64 encoded GCP service account key"
+  project_id:
+    required: true
+    description: "GCP Project ID"
+
+runs:
+  using: "composite"
+  steps:
+    - name: GCP Authentication
+      uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+      with:
+        gcp_service_account_key: ${{ inputs.gcp_service_account_key }}
+        project_id: ${{ inputs.project_id }}
+
+    - name: Initialize Terraform
+      uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+      with:
+        environment: ${{ inputs.environment }}
+        working_directory: ${{ inputs.working_directory }}
+
+    - name: Terraform Plan
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        echo "Running Terraform plan for ${{ inputs.environment }}..."
+        terraform plan -no-color

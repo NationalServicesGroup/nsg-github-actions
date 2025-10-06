@@ -1,0 +1,112 @@
+name: Terraform Deploy
+run-name: Deploy to ${{ inputs.environment }}
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Environment to deploy (e.g., stage, hgeprod)"
+        required: true
+        type: string
+      working_directory:
+        description: "Working directory for Terraform"
+        required: false
+        type: string
+        default: "."
+      tf_version:
+        description: "Terraform version"
+        required: false
+        type: string
+        default: "1.12.0"
+      require_approval:
+        description: "Require manual approval before deploy"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      gcp_service_account_key:
+        required: true
+      project_id:
+        required: true
+
+jobs:
+  plan:
+    name: Plan ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    outputs:
+      plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
+        with:
+          tf_version: ${{ inputs.tf_version }}
+
+      - name: GCP Authentication
+        uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+        with:
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          project_id: ${{ secrets.project_id }}
+
+      - name: Initialize Terraform
+        uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+        with:
+          environment: ${{ inputs.environment }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform plan -detailed-exitcode -out=tfplan || export exitcode=$?
+          echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
+          exit 0
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.working_directory }}/tfplan
+          retention-days: 1
+
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    needs: plan
+    runs-on: ubuntu-latest
+    if: needs.plan.outputs.plan_exitcode == '2'
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
+        with:
+          tf_version: ${{ inputs.tf_version }}
+
+      - name: GCP Authentication
+        uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+        with:
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          project_id: ${{ secrets.project_id }}
+
+      - name: Initialize Terraform
+        uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+        with:
+          environment: ${{ inputs.environment }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.working_directory }}
+
+      - name: Terraform Apply
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform apply -auto-approve tfplan

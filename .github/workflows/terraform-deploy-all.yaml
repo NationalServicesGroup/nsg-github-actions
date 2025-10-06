@@ -1,0 +1,121 @@
+name: Deploy All Environments
+run-name: Deploy All Environments
+
+on:
+  workflow_call:
+    inputs:
+      environments:
+        description: "JSON array of environments to deploy in order (e.g., ['stage', 'hgeprod'])"
+        required: false
+        type: string
+        default: '["stage", "hgeprod"]'
+      working_directory:
+        description: "Working directory for Terraform"
+        required: false
+        type: string
+        default: "."
+      tf_version:
+        description: "Terraform version"
+        required: false
+        type: string
+        default: "1.12.0"
+    secrets:
+      gcp_service_account_key:
+        required: true
+      project_id:
+        required: true
+
+jobs:
+  setup:
+    name: Setup Deploy Jobs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          echo "matrix={\"environment\":${{ inputs.environments }}}" >> $GITHUB_OUTPUT
+
+  plan-all:
+    name: Plan ${{ matrix.environment }}
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
+        with:
+          tf_version: ${{ inputs.tf_version }}
+
+      - name: GCP Authentication
+        uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+        with:
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          project_id: ${{ secrets.project_id }}
+
+      - name: Initialize Terraform
+        uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+        with:
+          environment: ${{ matrix.environment }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: Terraform Plan
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform plan -out=tfplan
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: ${{ inputs.working_directory }}/tfplan
+          retention-days: 1
+
+  deploy-sequential:
+    name: Deploy ${{ matrix.environment }}
+    needs: [setup, plan-all]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    environment: ${{ matrix.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
+        with:
+          tf_version: ${{ inputs.tf_version }}
+
+      - name: GCP Authentication
+        uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+        with:
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          project_id: ${{ secrets.project_id }}
+
+      - name: Initialize Terraform
+        uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+        with:
+          environment: ${{ matrix.environment }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: ${{ inputs.working_directory }}
+
+      - name: Terraform Apply
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform apply -auto-approve tfplan

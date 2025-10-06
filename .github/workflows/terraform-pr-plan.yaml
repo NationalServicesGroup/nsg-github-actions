@@ -1,0 +1,116 @@
+name: Terraform PR Plan
+run-name: Terraform Plan for Pull Request
+
+on:
+  workflow_call:
+    inputs:
+      environments:
+        description: "JSON array of environments to plan (e.g., ['stage', 'hgeprod'])"
+        required: false
+        type: string
+        default: '["stage"]'
+      working_directory:
+        description: "Working directory for Terraform"
+        required: false
+        type: string
+        default: "."
+      tf_version:
+        description: "Terraform version"
+        required: false
+        type: string
+        default: "1.12.0"
+    secrets:
+      gcp_service_account_key:
+        required: true
+      project_id:
+        required: true
+
+jobs:
+  setup:
+    name: Setup Plan Jobs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          echo "matrix={\"environment\":${{ inputs.environments }}}" >> $GITHUB_OUTPUT
+
+  plan:
+    name: Plan ${{ matrix.environment }}
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
+        with:
+          tf_version: ${{ inputs.tf_version }}
+
+      - name: GCP Authentication
+        uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+        with:
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          project_id: ${{ secrets.project_id }}
+
+      - name: Initialize Terraform
+        uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+        with:
+          environment: ${{ matrix.environment }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+        continue-on-error: true
+
+      - name: Comment PR with Plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ inputs.working_directory }}/plan.txt', 'utf8');
+            const maxLength = 65000;
+            let truncatedPlan = plan;
+
+            if (plan.length > maxLength) {
+              truncatedPlan = plan.substring(0, maxLength) + '\n\n... (truncated)';
+            }
+
+            const output = `### Terraform Plan: \`${{ matrix.environment }}\`
+
+            <details>
+            <summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${truncatedPlan}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Fail if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

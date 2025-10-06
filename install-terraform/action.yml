@@ -1,0 +1,20 @@
+name: "Terraform Setup"
+description: "Installs Terraform"
+
+inputs:
+  tf_version:
+    description: "Terraform version to install"
+    default: "1.12.2"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.tf_version }}
+
+    - name: Verify Terraform Installation
+      shell: bash
+      run: |
+        terraform -v
