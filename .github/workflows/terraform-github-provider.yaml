@@ -35,6 +35,9 @@ on:
       github_owner:
         description: "GitHub organization/owner name"
         required: true
+      gcp_service_account_key:
+        description: "GCP service account key (only needed if using GCS backend)"
+        required: false
 
 permissions:
   contents: read
@@ -57,6 +60,14 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ inputs.tf_version }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.gcp_service_account_key }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Terraform Format Check
         working-directory: ${{ inputs.working_directory }}
@@ -227,6 +238,14 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ inputs.tf_version }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.gcp_service_account_key }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Terraform Init
         working-directory: ${{ inputs.working_directory }}
