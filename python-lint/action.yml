@@ -27,14 +27,22 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Install ruff
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "Installing ruff..."
+        uv tool install ruff || uv pip install ruff
+        echo "✓ Ruff installed"
+
     - name: Run ruff check
       id: lint
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
         echo "Running ruff check..."
-        # Use uv run to execute ruff from the venv
-        if uv run ruff check ${{ inputs.ruff-args }} .; then
+        # Use uvx to run ruff (uv's tool runner)
+        if uvx ruff check ${{ inputs.ruff-args }} .; then
           echo "status=success" >> $GITHUB_OUTPUT
           echo "✓ Ruff check passed"
         else
@@ -51,8 +59,8 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         echo "Running ruff format check..."
-        # Use uv run to execute ruff from the venv
-        if uv run ruff format --check .; then
+        # Use uvx to run ruff (uv's tool runner)
+        if uvx ruff format --check .; then
           echo "✓ Ruff format check passed"
         else
           echo "✗ Ruff format check failed - code is not properly formatted"
