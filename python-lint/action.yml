@@ -54,6 +54,11 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        # Ensure venv is in PATH if VIRTUAL_ENV is set
+        if [ -n "$VIRTUAL_ENV" ] && [ -d "$VIRTUAL_ENV/bin" ]; then
+          export PATH="$VIRTUAL_ENV/bin:$PATH"
+        fi
+
         echo "Running ruff format check..."
         if ruff format --check .; then
           echo "✓ Ruff format check passed"
