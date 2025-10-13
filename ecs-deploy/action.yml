@@ -1,0 +1,185 @@
+name: "ECS Deploy"
+description: "Updates ECS task definition and deploys to ECS service"
+
+inputs:
+  cluster-name:
+    description: "ECS cluster name"
+    required: true
+  service-name:
+    description: "ECS service name"
+    required: true
+  task-definition:
+    description: "Task definition name or family"
+    required: true
+  image-uri:
+    description: "Full Docker image URI to deploy"
+    required: true
+  container-name:
+    description: "Container name in task definition to update (defaults to first container)"
+    required: false
+    default: ""
+  aws-region:
+    description: "AWS region"
+    required: false
+    default: "us-east-1"
+  wait-for-stable:
+    description: "Wait for service to become stable after deployment"
+    required: false
+    default: "true"
+  wait-timeout:
+    description: "Timeout in seconds for waiting for stable service"
+    required: false
+    default: "600"
+  force-new-deployment:
+    description: "Force a new deployment"
+    required: false
+    default: "true"
+
+outputs:
+  task-definition-arn:
+    description: "ARN of the new task definition"
+    value: ${{ steps.deploy.outputs.task-definition-arn }}
+  service-arn:
+    description: "ARN of the updated service"
+    value: ${{ steps.deploy.outputs.service-arn }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure AWS region
+      shell: bash
+      run: |
+        aws configure set default.region ${{ inputs.aws-region }}
+        echo "✓ AWS region set to ${{ inputs.aws-region }}"
+
+    - name: Get current task definition
+      id: get-taskdef
+      shell: bash
+      run: |
+        echo "Fetching current task definition: ${{ inputs.task-definition }}"
+
+        TASK_DEF=$(aws ecs describe-task-definition \
+          --task-definition ${{ inputs.task-definition }} \
+          --query 'taskDefinition' \
+          --output json | tr -d '\r')
+
+        echo "task-def<<EOF" >> $GITHUB_OUTPUT
+        echo "$TASK_DEF" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "✓ Retrieved task definition"
+
+    - name: Update task definition with new image
+      id: update-taskdef
+      shell: bash
+      run: |
+        echo "Updating task definition with new image: ${{ inputs.image-uri }}"
+
+        # Determine container index to update
+        if [ -n "${{ inputs.container-name }}" ]; then
+          # Find container by name
+          CONTAINER_INDEX=$(echo '${{ steps.get-taskdef.outputs.task-def }}' | \
+            jq '[.containerDefinitions[].name] | index("${{ inputs.container-name }}")')
+          if [ "$CONTAINER_INDEX" = "null" ]; then
+            echo "Error: Container '${{ inputs.container-name }}' not found in task definition"
+            exit 1
+          fi
+        else
+          # Use first container
+          CONTAINER_INDEX=0
+        fi
+
+        # Update image and clean unnecessary fields
+        NEW_TASK_DEF=$(echo '${{ steps.get-taskdef.outputs.task-def }}' | \
+          jq --arg IMAGE "${{ inputs.image-uri }}" \
+             --argjson IDX "$CONTAINER_INDEX" \
+          '.containerDefinitions[$IDX].image = $IMAGE |
+           del(.taskDefinitionArn) |
+           del(.revision) |
+           del(.status) |
+           del(.requiresAttributes) |
+           del(.compatibilities) |
+           del(.registeredAt) |
+           del(.registeredBy)')
+
+        echo "new-task-def<<EOF" >> $GITHUB_OUTPUT
+        echo "$NEW_TASK_DEF" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "✓ Task definition updated"
+
+    - name: Register new task definition
+      id: register
+      shell: bash
+      run: |
+        echo "Registering new task definition..."
+
+        NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+          --cli-input-json '${{ steps.update-taskdef.outputs.new-task-def }}' \
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+
+        echo "task-definition-arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
+        echo "✓ Registered task definition: $NEW_TASK_DEF_ARN"
+
+    - name: Update ECS service
+      id: deploy
+      shell: bash
+      run: |
+        echo "Updating ECS service: ${{ inputs.service-name }}"
+
+        FORCE_FLAG=""
+        if [ "${{ inputs.force-new-deployment }}" = "true" ]; then
+          FORCE_FLAG="--force-new-deployment"
+        fi
+
+        SERVICE_ARN=$(aws ecs update-service \
+          --cluster ${{ inputs.cluster-name }} \
+          --service ${{ inputs.service-name }} \
+          --task-definition ${{ steps.register.outputs.task-definition-arn }} \
+          $FORCE_FLAG \
+          --query 'service.serviceArn' \
+          --output text)
+
+        echo "service-arn=$SERVICE_ARN" >> $GITHUB_OUTPUT
+        echo "task-definition-arn=${{ steps.register.outputs.task-definition-arn }}" >> $GITHUB_OUTPUT
+
+        echo "✓ Service update initiated"
+        echo "Service ARN: $SERVICE_ARN"
+
+    - name: Wait for service stability
+      if: inputs.wait-for-stable == 'true'
+      shell: bash
+      run: |
+        echo "Waiting for service to become stable (timeout: ${{ inputs.wait-timeout }}s)..."
+
+        aws ecs wait services-stable \
+          --cluster ${{ inputs.cluster-name }} \
+          --services ${{ inputs.service-name }} \
+          --cli-read-timeout ${{ inputs.wait-timeout }}
+
+        echo "✓ Service is now stable"
+
+    - name: Get service status
+      if: always()
+      shell: bash
+      run: |
+        echo "Fetching service status..."
+
+        aws ecs describe-services \
+          --cluster ${{ inputs.cluster-name }} \
+          --services ${{ inputs.service-name }} \
+          --query 'services[0].[serviceName,status,runningCount,desiredCount,deployments[0].status]' \
+          --output table
+
+    - name: Generate deployment summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## ECS Deployment Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Cluster**: \`${{ inputs.cluster-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Service**: \`${{ inputs.service-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Task Definition**: \`${{ steps.register.outputs.task-definition-arn }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: \`${{ inputs.image-uri }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Region**: \`${{ inputs.aws-region }}\`" >> $GITHUB_STEP_SUMMARY

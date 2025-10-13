@@ -1,0 +1,53 @@
+name: "AWS Authentication"
+description: "Authenticates with AWS using access keys or IAM role"
+
+inputs:
+  aws-access-key-id:
+    description: "AWS Access Key ID"
+    required: false
+  aws-secret-access-key:
+    description: "AWS Secret Access Key"
+    required: false
+  aws-region:
+    description: "AWS Region"
+    required: false
+    default: "us-east-1"
+  role-to-assume:
+    description: "IAM Role ARN to assume (for OIDC authentication)"
+    required: false
+  role-session-name:
+    description: "Session name for assumed role"
+    required: false
+    default: "GitHubActions"
+
+outputs:
+  aws-account-id:
+    description: "AWS Account ID"
+    value: ${{ steps.configure.outputs.account-id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure AWS Credentials
+      id: configure
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+        aws-region: ${{ inputs.aws-region }}
+        role-to-assume: ${{ inputs.role-to-assume }}
+        role-session-name: ${{ inputs.role-session-name }}
+
+    - name: Verify AWS credentials
+      shell: bash
+      run: |
+        echo "Testing AWS credentials..."
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        echo "✓ Successfully authenticated with AWS"
+        echo "Account ID: $AWS_ACCOUNT_ID"
+        echo "Region: ${{ inputs.aws-region }}"
+        echo "account-id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
+
+    - name: Display AWS CLI version
+      shell: bash
+      run: aws --version

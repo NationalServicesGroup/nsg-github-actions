@@ -1,0 +1,146 @@
+name: "Docker Build and Push to ECR"
+description: "Builds Docker image with platform detection and pushes to AWS ECR"
+
+inputs:
+  ecr-registry:
+    description: "ECR registry URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com)"
+    required: true
+  image-name:
+    description: "Docker image name"
+    required: true
+  image-tag:
+    description: "Docker image tag"
+    required: false
+    default: ${{ github.sha }}
+  context:
+    description: "Docker build context"
+    required: false
+    default: "."
+  dockerfile:
+    description: "Path to Dockerfile"
+    required: false
+    default: "Dockerfile"
+  build-args:
+    description: "Build arguments (key=value pairs, one per line)"
+    required: false
+    default: ""
+  platforms:
+    description: "Target platforms (e.g., linux/amd64,linux/arm64)"
+    required: false
+    default: "linux/amd64"
+  use-buildkit:
+    description: "Whether to use Docker BuildKit"
+    required: false
+    default: "true"
+  push-latest:
+    description: "Whether to also tag and push as 'latest'"
+    required: false
+    default: "true"
+  no-cache:
+    description: "Build without cache"
+    required: false
+    default: "false"
+
+outputs:
+  image-uri:
+    description: "Full URI of the pushed image with tag"
+    value: ${{ steps.build.outputs.image-uri }}
+  image-digest:
+    description: "Image digest"
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Log in to Amazon ECR
+      shell: bash
+      run: |
+        echo "Logging in to ECR..."
+        aws ecr get-login-password | docker login --username AWS --password-stdin ${{ inputs.ecr-registry }}
+        echo "✓ Successfully logged in to ECR"
+
+    - name: Set up Docker Buildx
+      if: inputs.use-buildkit == 'true'
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push Docker image
+      id: build
+      shell: bash
+      env:
+        DOCKER_BUILDKIT: ${{ inputs.use-buildkit }}
+      run: |
+        echo "Building Docker image..."
+
+        IMAGE_URI="${{ inputs.ecr-registry }}/${{ inputs.image-name }}:${{ inputs.image-tag }}"
+        IMAGE_LATEST="${{ inputs.ecr-registry }}/${{ inputs.image-name }}:latest"
+
+        # Build args setup
+        BUILD_ARGS=""
+        if [ -n "${{ inputs.build-args }}" ]; then
+          while IFS= read -r arg; do
+            [ -n "$arg" ] && BUILD_ARGS="$BUILD_ARGS --build-arg $arg"
+          done <<< "${{ inputs.build-args }}"
+        fi
+
+        # No cache flag
+        NO_CACHE=""
+        if [ "${{ inputs.no-cache }}" = "true" ]; then
+          NO_CACHE="--no-cache"
+        fi
+
+        # Build command
+        if [ "${{ inputs.use-buildkit }}" = "true" ]; then
+          # BuildKit build
+          TAGS="-t $IMAGE_URI"
+          if [ "${{ inputs.push-latest }}" = "true" ]; then
+            TAGS="$TAGS -t $IMAGE_LATEST"
+          fi
+
+          docker buildx build \
+            --platform ${{ inputs.platforms }} \
+            $TAGS \
+            $BUILD_ARGS \
+            $NO_CACHE \
+            --push \
+            -f ${{ inputs.dockerfile }} \
+            ${{ inputs.context }}
+        else
+          # Legacy Docker build (for compatibility)
+          docker build \
+            --platform ${{ inputs.platforms }} \
+            -t $IMAGE_URI \
+            $BUILD_ARGS \
+            $NO_CACHE \
+            -f ${{ inputs.dockerfile }} \
+            ${{ inputs.context }}
+
+          docker push $IMAGE_URI
+
+          if [ "${{ inputs.push-latest }}" = "true" ]; then
+            docker tag $IMAGE_URI $IMAGE_LATEST
+            docker push $IMAGE_LATEST
+          fi
+        fi
+
+        # Get image digest
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_URI 2>/dev/null || echo "")
+
+        echo "✓ Successfully built and pushed image"
+        echo "Image URI: $IMAGE_URI"
+        [ -n "$DIGEST" ] && echo "Digest: $DIGEST"
+
+        echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+        echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+
+    - name: Generate build summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## Docker Build Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: \`${{ inputs.ecr-registry }}/${{ inputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tag**: \`${{ inputs.image-tag }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platform**: \`${{ inputs.platforms }}\`" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ inputs.push-latest }}" = "true" ]; then
+          echo "- **Also tagged as**: \`latest\`" >> $GITHUB_STEP_SUMMARY
+        fi

@@ -1,0 +1,79 @@
+name: "Setup SSH"
+description: "Configures SSH keys for accessing private repositories"
+
+inputs:
+  ssh-private-key:
+    description: "SSH private key (base64 encoded or raw)"
+    required: true
+  ssh-known-hosts:
+    description: "SSH known hosts to add (e.g., github.com, bitbucket.org)"
+    required: false
+    default: "github.com,bitbucket.org"
+  ssh-key-name:
+    description: "Name for the SSH key file"
+    required: false
+    default: "id_ed25519"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create SSH directory
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        echo "✓ SSH directory created"
+
+    - name: Setup SSH key
+      shell: bash
+      run: |
+        echo "Setting up SSH key..."
+
+        # Check if key is base64 encoded
+        if echo "${{ inputs.ssh-private-key }}" | grep -q '^[A-Za-z0-9+/=]*$' && ! echo "${{ inputs.ssh-private-key }}" | grep -q 'BEGIN'; then
+          echo "Detected base64 encoded key, decoding..."
+          echo "${{ inputs.ssh-private-key }}" | base64 -d > ~/.ssh/${{ inputs.ssh-key-name }}
+        else
+          echo "Using raw SSH key..."
+          echo "${{ inputs.ssh-private-key }}" > ~/.ssh/${{ inputs.ssh-key-name }}
+        fi
+
+        chmod 600 ~/.ssh/${{ inputs.ssh-key-name }}
+        echo "✓ SSH key configured"
+
+    - name: Add known hosts
+      shell: bash
+      run: |
+        echo "Adding SSH known hosts..."
+
+        # Split comma-separated hosts
+        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh-known-hosts }}"
+
+        for host in "${HOSTS[@]}"; do
+          host=$(echo "$host" | xargs)  # Trim whitespace
+          if [ -n "$host" ]; then
+            echo "Adding known host: $host"
+            ssh-keyscan -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+        done
+
+        chmod 644 ~/.ssh/known_hosts
+        echo "✓ Known hosts added"
+
+    - name: Start SSH agent
+      shell: bash
+      run: |
+        echo "Starting SSH agent..."
+        eval "$(ssh-agent -s)"
+        ssh-add ~/.ssh/${{ inputs.ssh-key-name }}
+        echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
+        echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> $GITHUB_ENV
+        echo "✓ SSH agent started and key added"
+
+    - name: Verify SSH setup
+      shell: bash
+      run: |
+        echo "Verifying SSH setup..."
+        echo "SSH key fingerprint:"
+        ssh-keygen -lf ~/.ssh/${{ inputs.ssh-key-name }}.pub 2>/dev/null || ssh-keygen -lf ~/.ssh/${{ inputs.ssh-key-name }}
+        echo "✓ SSH setup complete"

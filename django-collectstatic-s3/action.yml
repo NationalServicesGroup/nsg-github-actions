@@ -1,0 +1,145 @@
+name: "Django Collectstatic to S3"
+description: "Collects Django static files and uploads them to S3"
+
+inputs:
+  working-directory:
+    description: "Working directory for the Django project"
+    required: false
+    default: "."
+  django-settings:
+    description: "Django settings module to use"
+    required: false
+    default: ""
+  s3-bucket:
+    description: "S3 bucket name to upload static files"
+    required: true
+  s3-prefix:
+    description: "S3 prefix/path for static files"
+    required: false
+    default: "static/"
+  aws-region:
+    description: "AWS region"
+    required: false
+    default: "us-east-1"
+  cloudfront-distribution-id:
+    description: "CloudFront distribution ID for cache invalidation"
+    required: false
+    default: ""
+  delete-removed:
+    description: "Delete files in S3 that don't exist locally"
+    required: false
+    default: "false"
+  dry-run:
+    description: "Perform a dry run without actually uploading"
+    required: false
+    default: "false"
+  cache-control:
+    description: "Cache-Control header for uploaded files"
+    required: false
+    default: "public, max-age=31536000, immutable"
+
+outputs:
+  files-uploaded:
+    description: "Number of files uploaded"
+    value: ${{ steps.upload.outputs.files-uploaded }}
+  s3-url:
+    description: "Base S3 URL for static files"
+    value: ${{ steps.upload.outputs.s3-url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run Django collectstatic
+      id: collectstatic
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ inputs.django-settings }}
+      run: |
+        echo "Running Django collectstatic..."
+
+        # Build collectstatic command
+        COLLECTSTATIC_CMD="python manage.py collectstatic --noinput --clear"
+
+        if [ -n "${{ inputs.django-settings }}" ]; then
+          COLLECTSTATIC_CMD="$COLLECTSTATIC_CMD --settings=${{ inputs.django-settings }}"
+        fi
+
+        echo "Running: $COLLECTSTATIC_CMD"
+        eval "$COLLECTSTATIC_CMD"
+
+        echo "✓ Static files collected"
+
+        # Get static root directory
+        STATIC_ROOT=$(python manage.py diffsettings --output unified 2>/dev/null | grep "STATIC_ROOT" | awk '{print $3}' | tr -d "'" || echo "staticfiles")
+        echo "static-root=$STATIC_ROOT" >> $GITHUB_OUTPUT
+        echo "Static root: $STATIC_ROOT"
+
+    - name: Upload to S3
+      id: upload
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "Uploading static files to S3..."
+
+        STATIC_ROOT="${{ steps.collectstatic.outputs.static-root }}"
+        S3_PATH="s3://${{ inputs.s3-bucket }}/${{ inputs.s3-prefix }}"
+
+        # Build sync command
+        SYNC_CMD="aws s3 sync $STATIC_ROOT $S3_PATH"
+        SYNC_CMD="$SYNC_CMD --region ${{ inputs.aws-region }}"
+        SYNC_CMD="$SYNC_CMD --cache-control '${{ inputs.cache-control }}'"
+
+        if [ "${{ inputs.delete-removed }}" = "true" ]; then
+          SYNC_CMD="$SYNC_CMD --delete"
+        fi
+
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          SYNC_CMD="$SYNC_CMD --dryrun"
+        fi
+
+        # Count files before upload
+        FILE_COUNT=$(find "$STATIC_ROOT" -type f | wc -l | xargs)
+
+        echo "Running: $SYNC_CMD"
+        eval "$SYNC_CMD"
+
+        echo "✓ Static files uploaded to S3"
+        echo "files-uploaded=$FILE_COUNT" >> $GITHUB_OUTPUT
+        echo "s3-url=https://${{ inputs.s3-bucket }}.s3.${{ inputs.aws-region }}.amazonaws.com/${{ inputs.s3-prefix }}" >> $GITHUB_OUTPUT
+        echo "Files uploaded: $FILE_COUNT"
+
+    - name: Invalidate CloudFront cache
+      if: inputs.cloudfront-distribution-id != '' && inputs.dry-run == 'false'
+      shell: bash
+      run: |
+        echo "Invalidating CloudFront cache..."
+
+        INVALIDATION_ID=$(aws cloudfront create-invalidation \
+          --distribution-id ${{ inputs.cloudfront-distribution-id }} \
+          --paths "/${{ inputs.s3-prefix }}*" \
+          --query 'Invalidation.Id' \
+          --output text)
+
+        echo "✓ CloudFront cache invalidation created: $INVALIDATION_ID"
+        echo "Note: Cache invalidation may take several minutes to complete"
+
+    - name: Generate deployment summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## Static Files Deployment" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **S3 Bucket**: \`${{ inputs.s3-bucket }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **S3 Prefix**: \`${{ inputs.s3-prefix }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Files Uploaded**: \`${{ steps.upload.outputs.files-uploaded }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Region**: \`${{ inputs.aws-region }}\`" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ inputs.cloudfront-distribution-id }}" != "" ]; then
+          echo "- **CloudFront**: Cache invalidation triggered" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Dry run mode** - No files were actually uploaded" >> $GITHUB_STEP_SUMMARY
+        fi

@@ -1,0 +1,76 @@
+name: "Python Lint with Ruff"
+description: "Runs ruff linting checks on Python code"
+
+inputs:
+  working-directory:
+    description: "Working directory for the project"
+    required: false
+    default: "."
+  ruff-args:
+    description: "Additional arguments to pass to ruff check"
+    required: false
+    default: ""
+  fail-on-error:
+    description: "Whether to fail the action on lint errors"
+    required: false
+    default: "true"
+  include-format-check:
+    description: "Whether to also run ruff format check"
+    required: false
+    default: "true"
+
+outputs:
+  lint-status:
+    description: "Status of the lint check (success/failure)"
+    value: ${{ steps.lint.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run ruff check
+      id: lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "Running ruff check..."
+        if ruff check ${{ inputs.ruff-args }} .; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "✓ Ruff check passed"
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "✗ Ruff check failed"
+          if [ "${{ inputs.fail-on-error }}" = "true" ]; then
+            exit 1
+          fi
+        fi
+
+    - name: Run ruff format check
+      if: inputs.include-format-check == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "Running ruff format check..."
+        if ruff format --check .; then
+          echo "✓ Ruff format check passed"
+        else
+          echo "✗ Ruff format check failed - code is not properly formatted"
+          if [ "${{ inputs.fail-on-error }}" = "true" ]; then
+            exit 1
+          fi
+        fi
+      continue-on-error: ${{ inputs.fail-on-error == 'false' }}
+
+    - name: Generate lint report summary
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "## Ruff Lint Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ steps.lint.outputs.status }}" = "success" ]; then
+          echo "✅ All lint checks passed!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Lint checks found issues" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Run \`ruff check --fix .\` to automatically fix issues" >> $GITHUB_STEP_SUMMARY
+        fi

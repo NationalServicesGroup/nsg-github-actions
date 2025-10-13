@@ -1,0 +1,198 @@
+name: "Python Django Tests with Pytest"
+description: "Runs pytest tests for Django applications with MySQL and Redis services"
+
+inputs:
+  working-directory:
+    description: "Working directory for the project"
+    required: false
+    default: "."
+  database-host:
+    description: "MySQL database host"
+    required: false
+    default: "127.0.0.1"
+  database-port:
+    description: "MySQL database port"
+    required: false
+    default: "3306"
+  database-user:
+    description: "MySQL database user"
+    required: false
+    default: "root"
+  database-password:
+    description: "MySQL database password"
+    required: false
+    default: "root"
+  database-name:
+    description: "MySQL database name"
+    required: false
+    default: "test_db"
+  database-init-sql:
+    description: "Path to SQL file to initialize database"
+    required: false
+    default: ""
+  redis-host:
+    description: "Redis host"
+    required: false
+    default: "127.0.0.1"
+  redis-port:
+    description: "Redis port"
+    required: false
+    default: "6379"
+  pytest-args:
+    description: "Additional arguments to pass to pytest"
+    required: false
+    default: "--exitfirst"
+  wait-for-db:
+    description: "Whether to wait for database to be ready"
+    required: false
+    default: "true"
+  wait-retries:
+    description: "Number of retries when waiting for database"
+    required: false
+    default: "40"
+  wait-seconds:
+    description: "Seconds between retries when waiting for database"
+    required: false
+    default: "1"
+  django-settings:
+    description: "Django settings module to use"
+    required: false
+    default: ""
+  coverage:
+    description: "Whether to generate coverage report"
+    required: false
+    default: "false"
+  coverage-args:
+    description: "Additional arguments for coverage"
+    required: false
+    default: "--cov=. --cov-report=term-missing --cov-report=xml"
+
+outputs:
+  test-status:
+    description: "Status of the test run (success/failure)"
+    value: ${{ steps.test.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create log directory
+      shell: bash
+      run: |
+        mkdir -p /var/log/django/ || sudo mkdir -p /var/log/django/
+        chmod 777 /var/log/django/ || sudo chmod 777 /var/log/django/
+
+    - name: Wait for database
+      if: inputs.wait-for-db == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        DATABASE_HOST: ${{ inputs.database-host }}
+        DATABASE_PORT: ${{ inputs.database-port }}
+        DATABASE_USER: ${{ inputs.database-user }}
+        DATABASE_PASSWORD: ${{ inputs.database-password }}
+      run: |
+        echo "Waiting for MySQL to be ready..."
+
+        # Check if Django management command exists
+        if [ -f "manage.py" ]; then
+          # Try using Django's waitdb command if available
+          python manage.py waitdb --seconds ${{ inputs.wait-seconds }} --retries ${{ inputs.wait-retries }} 2>/dev/null || {
+            # Fallback to manual check
+            for i in $(seq 1 ${{ inputs.wait-retries }}); do
+              if mysql -h"$DATABASE_HOST" -P"$DATABASE_PORT" -u"$DATABASE_USER" -p"$DATABASE_PASSWORD" -e "SELECT 1" > /dev/null 2>&1; then
+                echo "✓ Database is ready"
+                break
+              fi
+              echo "Waiting for database... attempt $i/${{ inputs.wait-retries }}"
+              sleep ${{ inputs.wait-seconds }}
+            done
+          }
+        else
+          # Pure MySQL check
+          for i in $(seq 1 ${{ inputs.wait-retries }}); do
+            if mysql -h"$DATABASE_HOST" -P"$DATABASE_PORT" -u"$DATABASE_USER" -p"$DATABASE_PASSWORD" -e "SELECT 1" > /dev/null 2>&1; then
+              echo "✓ Database is ready"
+              break
+            fi
+            echo "Waiting for database... attempt $i/${{ inputs.wait-retries }}"
+            sleep ${{ inputs.wait-seconds }}
+          done
+        fi
+
+    - name: Initialize database
+      if: inputs.database-init-sql != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "Initializing database with SQL file..."
+        cat ${{ inputs.database-init-sql }} | mysql \
+          --host=${{ inputs.database-host }} \
+          --port=${{ inputs.database-port }} \
+          --user=${{ inputs.database-user }} \
+          --password=${{ inputs.database-password }}
+        echo "✓ Database initialized"
+
+    - name: Run pytest
+      id: test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        DJANGO_ALLOW_ASYNC_UNSAFE: "true"
+        PYTHONDONTWRITEBYTECODE: "1"
+        DATABASE_HOST: ${{ inputs.database-host }}
+        DATABASE_PORT: ${{ inputs.database-port }}
+        DATABASE_USER: ${{ inputs.database-user }}
+        DATABASE_PASSWORD: ${{ inputs.database-password }}
+        DATABASE_NAME: ${{ inputs.database-name }}
+        REDIS_HOST: ${{ inputs.redis-host }}
+        REDIS_PORT: ${{ inputs.redis-port }}
+      run: |
+        echo "Running pytest..."
+
+        # Build pytest command
+        PYTEST_CMD="pytest"
+
+        # Add Django settings if provided
+        if [ -n "${{ inputs.django-settings }}" ]; then
+          PYTEST_CMD="$PYTEST_CMD --ds=${{ inputs.django-settings }}"
+        fi
+
+        # Add coverage if requested
+        if [ "${{ inputs.coverage }}" = "true" ]; then
+          PYTEST_CMD="$PYTEST_CMD ${{ inputs.coverage-args }}"
+        fi
+
+        # Add custom pytest args
+        PYTEST_CMD="$PYTEST_CMD ${{ inputs.pytest-args }}"
+
+        echo "Running: $PYTEST_CMD"
+
+        if eval "$PYTEST_CMD"; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "✓ All tests passed"
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "✗ Tests failed"
+          exit 1
+        fi
+
+    - name: Generate test summary
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ steps.test.outputs.status }}" = "success" ]; then
+          echo "✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Some tests failed" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Upload coverage reports
+      if: inputs.coverage == 'true' && always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: ${{ inputs.working-directory }}/coverage.xml
+        if-no-files-found: ignore

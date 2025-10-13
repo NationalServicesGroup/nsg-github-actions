@@ -1,0 +1,71 @@
+name: "Python Setup with uv"
+description: "Sets up Python environment using uv package manager"
+
+inputs:
+  python-version:
+    description: "Python version to install"
+    required: false
+    default: "3.13"
+  uv-version:
+    description: "uv version to install"
+    required: false
+    default: "latest"
+  working-directory:
+    description: "Working directory for the project"
+    required: false
+    default: "."
+  cache-dependencies:
+    description: "Whether to cache Python dependencies"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install uv
+      shell: bash
+      run: |
+        if [ "${{ inputs.uv-version }}" = "latest" ]; then
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+        else
+          curl -LsSf https://astral.sh/uv/${{ inputs.uv-version }}/install.sh | sh
+        fi
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Verify installations
+      shell: bash
+      run: |
+        python -V
+        uv -V
+
+    - name: Cache Python dependencies
+      if: inputs.cache-dependencies == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/uv
+          ${{ inputs.working-directory }}/.venv
+        key: ${{ runner.os }}-python-${{ inputs.python-version }}-${{ hashFiles('**/pyproject.toml', '**/uv.lock', '**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-python-${{ inputs.python-version }}-
+
+    - name: Sync dependencies with uv
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        uv sync
+        echo "VIRTUAL_ENV=${{ inputs.working-directory }}/.venv" >> $GITHUB_ENV
+        echo "${{ inputs.working-directory }}/.venv/bin" >> $GITHUB_PATH
+
+    - name: Verify virtual environment
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        which python
+        python --version
+        pip list
