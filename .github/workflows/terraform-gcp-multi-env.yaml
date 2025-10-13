@@ -182,6 +182,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [setup, terraform-plan]
     if: github.ref == 'refs/heads/main'
+    timeout-minutes: ${{ inputs.approval_timeout_minutes }}
 
     steps:
       - name: Download all plans
@@ -234,7 +235,6 @@ jobs:
 
             **Approve this issue** to proceed with `terraform apply` for all environments.
           exclude-workflow-initiator-as-approver: false
-          timeout-minutes: ${{ inputs.approval_timeout_minutes }}
 
   # Apply changes to all environments
   terraform-apply:
