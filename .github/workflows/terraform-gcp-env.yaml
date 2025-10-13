@@ -1,0 +1,251 @@
+name: Terraform GCP Single Environment
+run-name: Terraform ${{ inputs.environment }} - Plan and Apply
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Environment to manage (e.g., stage, hgeprod, prod)"
+        required: true
+        type: string
+      working_directory:
+        description: "Working directory for Terraform"
+        required: false
+        type: string
+        default: "."
+      tf_version:
+        description: "Terraform version"
+        required: false
+        type: string
+        default: "1.12.0"
+      approvers:
+        description: "Comma-separated list of GitHub usernames who can approve"
+        required: true
+        type: string
+      minimum_approvals:
+        description: "Minimum number of approvals required"
+        required: false
+        type: number
+        default: 1
+      approval_timeout_minutes:
+        description: "Timeout for approval in minutes"
+        required: false
+        type: number
+        default: 2400
+    secrets:
+      gcp_service_account_key:
+        description: "GCP service account key JSON"
+        required: true
+      pat_token:
+        description: "GitHub PAT token for PR comments and approval issues"
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  terraform-plan:
+    name: Plan ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.plan.outputs.has_changes }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
+        with:
+          tf_version: ${{ inputs.tf_version }}
+
+      - name: Determine Project ID
+        id: project
+        run: |
+          # Extract project_id from tfvars file
+          if [ -f "variables/${{ inputs.environment }}.tfvars" ]; then
+            PROJECT_ID=$(grep -E '^project_id\s*=' variables/${{ inputs.environment }}.tfvars | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+            echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+            echo "Found project_id: $PROJECT_ID"
+          else
+            echo "Error: variables/${{ inputs.environment }}.tfvars not found"
+            exit 1
+          fi
+
+      - name: GCP Authentication
+        uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+        with:
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          project_id: ${{ steps.project.outputs.project_id }}
+
+      - name: Initialize Terraform
+        uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+        with:
+          environment: ${{ inputs.environment }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          # Run plan and capture output
+          set +e
+          terraform plan -detailed-exitcode -no-color -out=tfplan 2>&1 | tee plan_output.txt
+          exitcode=$?
+          set -e
+
+          # Exit code 0 = no changes, 1 = error, 2 = changes
+          if [ $exitcode -eq 1 ]; then
+            echo "Terraform plan failed"
+            exit 1
+          elif [ $exitcode -eq 2 ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment PR with Plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.pat_token }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ inputs.working_directory }}/plan_output.txt', 'utf8');
+            const maxLength = 65000;
+            let truncatedPlan = plan;
+
+            if (plan.length > maxLength) {
+              truncatedPlan = plan.substring(0, maxLength) + '\n\n... (truncated)';
+            }
+
+            const output = `### Terraform Plan: \`${{ inputs.environment }}\`
+
+            <details>
+            <summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${truncatedPlan}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Upload Plan Artifacts
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: |
+            ${{ inputs.working_directory }}/tfplan
+            ${{ inputs.working_directory }}/plan_output.txt
+          retention-days: 1
+
+  manual-approval:
+    name: Approval for ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.ref == 'refs/heads/main' && needs.terraform-plan.outputs.has_changes == 'true'
+    timeout-minutes: ${{ inputs.approval_timeout_minutes }}
+
+    steps:
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: plan/
+
+      - name: Format Plan for Approval
+        id: format-plan
+        uses: NationalServicesGroup/nsg-github-actions/terraform-format-plan@main
+        with:
+          plan_file: plan/plan_output.txt
+
+      - name: Request Manual Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.pat_token }}
+          approvers: ${{ inputs.approvers }}
+          minimum-approvals: ${{ inputs.minimum_approvals }}
+          issue-title: "🚀 Terraform Apply Approval - ${{ inputs.environment }} - ${{ github.repository }}"
+          issue-body: |
+            ## Terraform Apply Approval Required
+
+            **Environment:** `${{ inputs.environment }}`
+            **Repository:** ${{ github.repository }}
+            **Branch:** ${{ github.ref_name }}
+            **Workflow:** ${{ github.workflow }}
+            **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            ### Proposed Changes
+
+            ```terraform
+            ${{ steps.format-plan.outputs.plan_formatted }}
+            ```
+
+            ---
+
+            **Approve this issue** to proceed with `terraform apply` for **${{ inputs.environment }}**.
+          exclude-workflow-initiator-as-approver: false
+
+  terraform-apply:
+    name: Apply ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: [terraform-plan, manual-approval]
+    if: github.ref == 'refs/heads/main' && needs.terraform-plan.outputs.has_changes == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
+        with:
+          tf_version: ${{ inputs.tf_version }}
+
+      - name: Determine Project ID
+        id: project
+        run: |
+          # Extract project_id from tfvars file
+          if [ -f "variables/${{ inputs.environment }}.tfvars" ]; then
+            PROJECT_ID=$(grep -E '^project_id\s*=' variables/${{ inputs.environment }}.tfvars | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+            echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+            echo "Found project_id: $PROJECT_ID"
+          else
+            echo "Error: variables/${{ inputs.environment }}.tfvars not found"
+            exit 1
+          fi
+
+      - name: GCP Authentication
+        uses: NationalServicesGroup/nsg-github-actions/gcp-auth@main
+        with:
+          gcp_service_account_key: ${{ secrets.gcp_service_account_key }}
+          project_id: ${{ steps.project.outputs.project_id }}
+
+      - name: Initialize Terraform
+        uses: NationalServicesGroup/nsg-github-actions/terraform-init@main
+        with:
+          environment: ${{ inputs.environment }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.working_directory }}
+
+      - name: Terraform Apply
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform apply -auto-approve tfplan
+          echo "✅ Successfully applied changes to ${{ inputs.environment }}"
