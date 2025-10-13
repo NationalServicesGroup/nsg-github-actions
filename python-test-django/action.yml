@@ -149,15 +149,10 @@ runs:
         REDIS_PORT: ${{ inputs.redis-port }}
         REDIS_URL: redis://${{ inputs.redis-host }}:${{ inputs.redis-port }}/0
       run: |
-        # Ensure venv is in PATH if VIRTUAL_ENV is set
-        if [ -n "$VIRTUAL_ENV" ] && [ -d "$VIRTUAL_ENV/bin" ]; then
-          export PATH="$VIRTUAL_ENV/bin:$PATH"
-        fi
-
         echo "Running pytest..."
 
-        # Build pytest command
-        PYTEST_CMD="pytest"
+        # Build pytest command - use uv run to execute from venv
+        PYTEST_CMD="uv run pytest"
 
         # Add Django settings if provided
         if [ -n "${{ inputs.django-settings }}" ]; then

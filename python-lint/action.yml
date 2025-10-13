@@ -32,13 +32,9 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # Ensure venv is in PATH if VIRTUAL_ENV is set
-        if [ -n "$VIRTUAL_ENV" ] && [ -d "$VIRTUAL_ENV/bin" ]; then
-          export PATH="$VIRTUAL_ENV/bin:$PATH"
-        fi
-
         echo "Running ruff check..."
-        if ruff check ${{ inputs.ruff-args }} .; then
+        # Use uv run to execute ruff from the venv
+        if uv run ruff check ${{ inputs.ruff-args }} .; then
           echo "status=success" >> $GITHUB_OUTPUT
           echo "✓ Ruff check passed"
         else
@@ -54,13 +50,9 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # Ensure venv is in PATH if VIRTUAL_ENV is set
-        if [ -n "$VIRTUAL_ENV" ] && [ -d "$VIRTUAL_ENV/bin" ]; then
-          export PATH="$VIRTUAL_ENV/bin:$PATH"
-        fi
-
         echo "Running ruff format check..."
-        if ruff format --check .; then
+        # Use uv run to execute ruff from the venv
+        if uv run ruff format --check .; then
           echo "✓ Ruff format check passed"
         else
           echo "✗ Ruff format check failed - code is not properly formatted"
