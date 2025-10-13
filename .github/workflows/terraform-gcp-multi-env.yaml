@@ -62,8 +62,9 @@ jobs:
       - name: Set matrix
         id: set-matrix
         run: |
-          echo "matrix={\"environment\":${{ inputs.environments }}}" >> $GITHUB_OUTPUT
-          echo "environments=${{ inputs.environments }}" >> $GITHUB_OUTPUT
+          ENVIRONMENTS='${{ inputs.environments }}'
+          echo "matrix={\"environment\":${ENVIRONMENTS}}" >> $GITHUB_OUTPUT
+          echo "environments=${ENVIRONMENTS}" >> $GITHUB_OUTPUT
 
   # Plan for all environments (runs on PR and push to main)
   terraform-plan:
