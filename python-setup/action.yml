@@ -59,8 +59,10 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         uv sync
-        echo "VIRTUAL_ENV=${{ inputs.working-directory }}/.venv" >> $GITHUB_ENV
-        echo "${{ inputs.working-directory }}/.venv/bin" >> $GITHUB_PATH
+        # Use absolute path for virtual environment
+        VENV_PATH="$(pwd)/.venv"
+        echo "VIRTUAL_ENV=${VENV_PATH}" >> $GITHUB_ENV
+        echo "${VENV_PATH}/bin" >> $GITHUB_PATH
 
     - name: Verify virtual environment
       shell: bash
