@@ -75,11 +75,19 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        echo "Installing system dependencies..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq wkhtmltopdf mysql-client
+        echo "✓ System dependencies installed"
+
     - name: Create log directory
       shell: bash
       run: |
-        mkdir -p /var/log/django/ || sudo mkdir -p /var/log/django/
-        chmod 777 /var/log/django/ || sudo chmod 777 /var/log/django/
+        sudo mkdir -p /var/log/django/
+        sudo chmod 777 /var/log/django/
 
     - name: Wait for database
       if: inputs.wait-for-db == 'true'
