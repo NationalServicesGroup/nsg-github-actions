@@ -41,8 +41,8 @@ on:
       gcp_service_account_key:
         description: "GCP service account key JSON"
         required: true
-      github_token:
-        description: "GitHub token for PR comments and approval issues"
+      pat_token:
+        description: "GitHub PAT token for PR comments and approval issues"
         required: true
 
 permissions:
