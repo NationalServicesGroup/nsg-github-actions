@@ -4,7 +4,7 @@ description: "Authenticates with GCP using a service account key from secrets"
 inputs:
   gcp_service_account_key:
     required: true
-    description: "Base64 encoded GCP service account key"
+    description: "GCP service account key JSON (raw or base64 encoded)"
   project_id:
     required: true
     description: "GCP Project ID"
@@ -23,13 +23,15 @@ runs:
       run: |
         echo "Setting up GCP authentication with Service Account Key..."
 
-        if [ -z "${{ inputs.gcp_service_account_key }}" ]; then
-            echo "GCP_SERVICE_ACCOUNT_KEY is not set!"
-            exit 1
+        # Write credentials to file (handles both raw JSON and base64)
+        # Try to detect if it's base64 encoded (starts with ey for JWT or has base64 chars)
+        if echo "${{ inputs.gcp_service_account_key }}" | grep -q '^[A-Za-z0-9+/=]*$' && ! echo "${{ inputs.gcp_service_account_key }}" | grep -q '^{'; then
+          echo "Detected base64 encoded credentials, decoding..."
+          echo "${{ inputs.gcp_service_account_key }}" | base64 -d > credentials.json
+        else
+          echo "Using raw JSON credentials..."
+          echo '${{ inputs.gcp_service_account_key }}' > credentials.json
         fi
-
-        # Decode the service account key and save it to credentials.json
-        echo "${{ inputs.gcp_service_account_key }}" | base64 -d > credentials.json
 
         # Set environment variable for the credentials file
         echo "GOOGLE_APPLICATION_CREDENTIALS=$PWD/credentials.json" >> $GITHUB_ENV

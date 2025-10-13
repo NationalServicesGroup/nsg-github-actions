@@ -1,0 +1,78 @@
+name: Mirror from Bitbucket
+run-name: Mirror ${{ inputs.bitbucket_repo }} to GitHub
+
+on:
+  workflow_call:
+    inputs:
+      bitbucket_workspace:
+        description: "Bitbucket workspace/organization"
+        required: true
+        type: string
+      bitbucket_repo:
+        description: "Bitbucket repository name"
+        required: true
+        type: string
+      github_repo:
+        description: "GitHub repository name (defaults to same as Bitbucket)"
+        required: false
+        type: string
+      default_branch:
+        description: "Default branch to sync"
+        required: false
+        type: string
+        default: "main"
+      sync_all_branches:
+        description: "Sync all branches (not just default)"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      bitbucket_username:
+        description: "Bitbucket username"
+        required: true
+      bitbucket_app_password:
+        description: "Bitbucket app password"
+        required: true
+      github_token:
+        description: "GitHub PAT token with repo access"
+        required: true
+
+jobs:
+  mirror:
+    name: Mirror Repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set repository name
+        id: repo-name
+        run: |
+          GITHUB_REPO="${{ inputs.github_repo }}"
+          if [ -z "$GITHUB_REPO" ]; then
+            GITHUB_REPO="${{ inputs.bitbucket_repo }}"
+          fi
+          echo "github_repo=$GITHUB_REPO" >> $GITHUB_OUTPUT
+
+      - name: Clone from Bitbucket
+        run: |
+          git clone --mirror \
+            https://${{ secrets.bitbucket_username }}:${{ secrets.bitbucket_app_password }}@bitbucket.org/${{ inputs.bitbucket_workspace }}/${{ inputs.bitbucket_repo }}.git \
+            repo-mirror
+
+      - name: Push to GitHub
+        working-directory: repo-mirror
+        run: |
+          git remote set-url origin https://x-access-token:${{ secrets.github_token }}@github.com/${{ github.repository_owner }}/${{ steps.repo-name.outputs.github_repo }}.git
+
+          if [ "${{ inputs.sync_all_branches }}" == "true" ]; then
+            git push --mirror
+          else
+            git push origin ${{ inputs.default_branch }}
+          fi
+
+      - name: Sync Summary
+        run: |
+          echo "## Sync Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Source:** bitbucket.org/${{ inputs.bitbucket_workspace }}/${{ inputs.bitbucket_repo }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** github.com/${{ github.repository_owner }}/${{ steps.repo-name.outputs.github_repo }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch(es):** ${{ inputs.sync_all_branches == 'true' && 'All branches' || inputs.default_branch }}" >> $GITHUB_STEP_SUMMARY
