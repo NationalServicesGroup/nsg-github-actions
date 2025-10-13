@@ -139,6 +139,7 @@ runs:
       env:
         DJANGO_ALLOW_ASYNC_UNSAFE: "true"
         PYTHONDONTWRITEBYTECODE: "1"
+        DATABASE_URL: mysql://${{ inputs.database-user }}:${{ inputs.database-password }}@${{ inputs.database-host }}:${{ inputs.database-port }}/${{ inputs.database-name }}
         DATABASE_HOST: ${{ inputs.database-host }}
         DATABASE_PORT: ${{ inputs.database-port }}
         DATABASE_USER: ${{ inputs.database-user }}
@@ -146,6 +147,7 @@ runs:
         DATABASE_NAME: ${{ inputs.database-name }}
         REDIS_HOST: ${{ inputs.redis-host }}
         REDIS_PORT: ${{ inputs.redis-port }}
+        REDIS_URL: redis://${{ inputs.redis-host }}:${{ inputs.redis-port }}/0
       run: |
         echo "Running pytest..."
 
