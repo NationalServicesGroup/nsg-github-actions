@@ -172,12 +172,13 @@ runs:
           PYTEST_CMD="$PYTEST_CMD ${{ inputs.coverage-args }}"
         fi
 
-        # Add custom pytest args
-        PYTEST_CMD="$PYTEST_CMD ${{ inputs.pytest-args }}"
+        # Add custom pytest args (and add verbose mode for better output)
+        PYTEST_CMD="$PYTEST_CMD -v ${{ inputs.pytest-args }}"
 
         echo "Running: $PYTEST_CMD"
 
-        if eval "$PYTEST_CMD"; then
+        # Capture output for summary
+        if eval "$PYTEST_CMD" | tee pytest-output.txt; then
           echo "status=success" >> $GITHUB_OUTPUT
           echo "✓ All tests passed"
         else
@@ -193,10 +194,38 @@ runs:
       run: |
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
+
         if [ "${{ steps.test.outputs.status }}" = "success" ]; then
-          echo "✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+
+          # Extract test counts if available
+          if [ -f "pytest-output.txt" ]; then
+            PASSED=$(grep -oP '\d+ passed' pytest-output.txt | head -1 || echo "")
+            if [ -n "$PASSED" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "- $PASSED" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
         else
-          echo "❌ Some tests failed" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Tests failed**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract test results summary
+          if [ -f "pytest-output.txt" ]; then
+            # Get the summary line (e.g., "1 failed, 5 passed in 10.2s")
+            SUMMARY=$(grep -E '(passed|failed|error).*in [0-9.]+s' pytest-output.txt | tail -1 || echo "")
+            if [ -n "$SUMMARY" ]; then
+              echo "**Summary:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            # Extract failed test names
+            echo "### Failed Tests:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            grep "FAILED " pytest-output.txt | sed 's/FAILED /- /' >> $GITHUB_STEP_SUMMARY || echo "- Unable to parse failed tests" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No detailed test output available" >> $GITHUB_STEP_SUMMARY
+          fi
         fi
 
     - name: Upload coverage reports
