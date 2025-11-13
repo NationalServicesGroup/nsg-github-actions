@@ -152,7 +152,7 @@ runs:
       shell: bash
       run: |
         echo "Waiting for service to become stable (timeout: ${{ inputs.wait-timeout }}s)..."
-
+        sleep 120
         aws ecs wait services-stable \
           --cluster ${{ inputs.cluster-name }} \
           --services ${{ inputs.service-name }} \
