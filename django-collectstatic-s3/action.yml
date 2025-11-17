@@ -57,7 +57,7 @@ runs:
         DJANGO_SETTINGS_MODULE: ${{ inputs.django-settings }}
       run: |
         echo "Running Django collectstatic..."
-        cp .bitbucket/.env.cide .env
+        cp .bitbucket/.env.cicd .env
 
         # Build collectstatic command
         COLLECTSTATIC_CMD="python manage.py collectstatic --noinput --clear"
