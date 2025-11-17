@@ -59,8 +59,10 @@ runs:
         echo "Running Django collectstatic..."
         cp .bitbucket/.env.cicd .env
 
+        mkdir -p /data/staticfiles/hge-django/
+
         # Build collectstatic command
-        COLLECTSTATIC_CMD="python manage.py collectstatic --noinput --clear"
+        COLLECTSTATIC_CMD="uv run manage.py collectstatic --noinput --clear"
 
         if [ -n "${{ inputs.django-settings }}" ]; then
           COLLECTSTATIC_CMD="$COLLECTSTATIC_CMD --settings=${{ inputs.django-settings }}"
@@ -87,7 +89,7 @@ runs:
         S3_PATH="s3://${{ inputs.s3-bucket }}/${{ inputs.s3-prefix }}"
 
         # Build sync command
-        SYNC_CMD="aws s3 sync $STATIC_ROOT $S3_PATH"
+        SYNC_CMD="aws s3 cp --recursive $STATIC_ROOT $S3_PATH"
         SYNC_CMD="$SYNC_CMD --region ${{ inputs.aws-region }}"
         SYNC_CMD="$SYNC_CMD --cache-control '${{ inputs.cache-control }}'"
 
