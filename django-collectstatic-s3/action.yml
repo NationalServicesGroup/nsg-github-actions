@@ -72,6 +72,7 @@ runs:
         fi
 
         echo "Checkout manage.py options"
+        env
         uv run manage.py help
 
         echo "Running: $COLLECTSTATIC_CMD"
