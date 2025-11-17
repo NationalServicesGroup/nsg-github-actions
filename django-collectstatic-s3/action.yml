@@ -58,8 +58,9 @@ runs:
       run: |
         echo "Running Django collectstatic..."
         cp .bitbucket/.env.cicd .env
+        export DJANGO_STATIC_ROOT=$(pwd)/staticfiles/
 
-        mkdir -p /data/staticfiles/hge-django/
+        mkdir -p ${DJANGO_STATIC_ROOT}
 
         # Build collectstatic command
         COLLECTSTATIC_CMD="uv run manage.py collectstatic --noinput --clear"
@@ -75,8 +76,8 @@ runs:
 
         # Get static root directory
         STATIC_ROOT=$(python manage.py diffsettings --output unified 2>/dev/null | grep "STATIC_ROOT" | awk '{print $3}' | tr -d "'" || echo "staticfiles")
-        echo "static-root=$STATIC_ROOT" >> $GITHUB_OUTPUT
-        echo "Static root: $STATIC_ROOT"
+        echo "static-root=$DJANGO_STATIC_ROOT" >> $GITHUB_OUTPUT
+        echo "Static root: $DJANGO_STATIC_ROOT"
 
     - name: Upload to S3
       id: upload
