@@ -58,6 +58,7 @@ runs:
       run: |
         echo "Running Django collectstatic..."
         cp .bitbucket/.env.cicd .env
+        source .venv/bin/activate
         export DJANGO_STATIC_ROOT=$(pwd)/staticfiles/
 
         mkdir -p ${DJANGO_STATIC_ROOT}
