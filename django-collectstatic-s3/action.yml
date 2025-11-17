@@ -1,81 +1,79 @@
-name: "Django Collectstatic to S3"
-description: "Collects Django static files and uploads them to S3"
+name: 'Django Collectstatic to S3'
+description: 'Collects Django static files and uploads them to S3'
 
 inputs:
   working-directory:
-    description: "Working directory for the Django project"
+    description: 'Working directory for the Django project'
     required: false
-    default: "."
+    default: '.'
   django-settings:
-    description: "Django settings module to use"
+    description: 'Django settings module to use'
     required: false
-    default: ""
+    default: ''
   s3-bucket:
-    description: "S3 bucket name to upload static files"
+    description: 'S3 bucket name to upload static files'
     required: true
   s3-prefix:
-    description: "S3 prefix/path for static files"
+    description: 'S3 prefix/path for static files'
     required: false
-    default: "static/"
+    default: 'static/'
   aws-region:
-    description: "AWS region"
+    description: 'AWS region'
     required: false
-    default: "us-east-1"
+    default: 'us-east-1'
   cloudfront-distribution-id:
-    description: "CloudFront distribution ID for cache invalidation"
+    description: 'CloudFront distribution ID for cache invalidation'
     required: false
-    default: ""
+    default: ''
   delete-removed:
     description: "Delete files in S3 that don't exist locally"
     required: false
-    default: "false"
+    default: 'false'
   dry-run:
-    description: "Perform a dry run without actually uploading"
+    description: 'Perform a dry run without actually uploading'
     required: false
-    default: "false"
+    default: 'false'
   cache-control:
-    description: "Cache-Control header for uploaded files"
+    description: 'Cache-Control header for uploaded files'
     required: false
-    default: "public, max-age=31536000, immutable"
+    default: 'public, max-age=31536000, immutable'
 
 outputs:
   files-uploaded:
-    description: "Number of files uploaded"
+    description: 'Number of files uploaded'
     value: ${{ steps.upload.outputs.files-uploaded }}
   s3-url:
-    description: "Base S3 URL for static files"
+    description: 'Base S3 URL for static files'
     value: ${{ steps.upload.outputs.s3-url }}
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
     - name: Run Django collectstatic
       id: collectstatic
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      env:
-        DJANGO_SETTINGS_MODULE: ${{ inputs.django-settings }}
       run: |
         echo "Running Django collectstatic..."
         cp .bitbucket/.env.cicd .env
         source .venv/bin/activate
 
         export DJANGO_STATIC_ROOT=$(pwd)/staticfiles/
+        export LOG_PATH=$(pwd)/logs/
+        export NSG_ENV="${{ inputs.django-settings == 'hge.settings.prod' && 'prod' || inputs.django-settings == 'hge.settings.stage' && 'stage' || inputs.django-settings == 'hge.settings.dev' && 'dev' || 'prod' }}"
+        export DJANGO_SETTINGS_MODULE=hge.settings
+
+        echo "NSG_ENV: $NSG_ENV"
+        echo "DJANGO_SETTINGS_MODULE: $DJANGO_SETTINGS_MODULE"
+        echo "DJANGO_STATIC_ROOT: $DJANGO_STATIC_ROOT"
+        echo "LOG_PATH: $LOG_PATH"
 
         mkdir -p ${DJANGO_STATIC_ROOT}
+        mkdir -p ${LOG_PATH}
 
-        # Build collectstatic command
-        COLLECTSTATIC_CMD="uv run manage.py collectstatic --noinput --clear"
-
-        if [ -n "${{ inputs.django-settings }}" ]; then
-          COLLECTSTATIC_CMD="$COLLECTSTATIC_CMD --settings=${{ inputs.django-settings }}"
-        fi
-
-        echo "Checkout manage.py options"
-        uv run manage.py help
-
-        echo "Running: $COLLECTSTATIC_CMD"
-        eval "$COLLECTSTATIC_CMD"
+        # Run collectstatic
+        echo "Running: uv run manage.py collectstatic --noinput --clear"
+        uv run manage.py collectstatic --noinput --clear
 
         echo "✓ Static files collected"
 
