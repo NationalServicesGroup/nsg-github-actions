@@ -71,6 +71,9 @@ runs:
           COLLECTSTATIC_CMD="$COLLECTSTATIC_CMD --settings=${{ inputs.django-settings }}"
         fi
 
+        echo "Checkout manage.py options"
+        uv run manage.py help
+
         echo "Running: $COLLECTSTATIC_CMD"
         eval "$COLLECTSTATIC_CMD"
 
