@@ -108,6 +108,11 @@ jobs:
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
 
+      - name: Install GKE Auth Plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+          echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
+
       - name: Verify Tailscale Connection
         run: |
           echo "Tailscale status:"
@@ -296,6 +301,11 @@ jobs:
           oauth-client-id: ${{ secrets.ts_oauth_client_id }}
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
+
+      - name: Install GKE Auth Plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+          echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
       - name: Verify Tailscale Connection
         run: |
