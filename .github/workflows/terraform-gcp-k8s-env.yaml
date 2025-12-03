@@ -107,6 +107,7 @@ jobs:
           oauth-client-id: ${{ secrets.ts_oauth_client_id }}
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
+          args: --accept-routes
 
       - name: Install GKE Auth Plugin
         run: |
@@ -301,6 +302,7 @@ jobs:
           oauth-client-id: ${{ secrets.ts_oauth_client_id }}
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
+          args: --accept-routes
 
       - name: Install GKE Auth Plugin
         run: |
