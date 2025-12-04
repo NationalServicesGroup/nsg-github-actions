@@ -107,7 +107,10 @@ jobs:
           oauth-client-id: ${{ secrets.ts_oauth_client_id }}
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
-          args: --accept-routes
+
+      - name: Accept Tailscale Routes
+        run: |
+          sudo tailscale set --accept-routes
 
       - name: Install GKE Auth Plugin
         run: |
@@ -121,6 +124,9 @@ jobs:
           echo ""
           echo "Tailscale IP:"
           tailscale ip -4
+          echo ""
+          echo "Testing route to GKE control plane..."
+          curl -k --connect-timeout 5 https://${{ steps.project.outputs.cluster_endpoint }}/ || echo "Connection test completed"
 
       - name: Get GKE Credentials
         run: |
@@ -302,7 +308,10 @@ jobs:
           oauth-client-id: ${{ secrets.ts_oauth_client_id }}
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
-          args: --accept-routes
+
+      - name: Accept Tailscale Routes
+        run: |
+          sudo tailscale set --accept-routes
 
       - name: Install GKE Auth Plugin
         run: |
