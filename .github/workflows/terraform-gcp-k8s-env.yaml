@@ -125,8 +125,17 @@ jobs:
           echo "Tailscale IP:"
           tailscale ip -4
           echo ""
-          echo "Testing route to GKE control plane..."
-          curl -k --connect-timeout 5 https://${{ steps.project.outputs.cluster_endpoint }}/ || echo "Connection test completed"
+          echo "IP routes:"
+          ip route | grep -E "^10\.|^34\.|^35\." || echo "No matching routes"
+          echo ""
+          echo "Tailscale netcheck:"
+          tailscale netcheck
+          echo ""
+          echo "Testing ping to subnet router (stage-k8s-subnet-1):"
+          ping -c 2 100.100.128.108 || echo "Ping failed"
+          echo ""
+          echo "Testing route to GKE control plane (34.29.70.142):"
+          ping -c 2 34.29.70.142 || echo "Ping to GKE failed"
 
       - name: Get GKE Credentials
         run: |
