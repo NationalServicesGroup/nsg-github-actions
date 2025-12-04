@@ -140,15 +140,7 @@ jobs:
       - name: Get GKE Credentials and Setup Proxy
         id: gke-creds
         run: |
-          # Get the cluster endpoint
-          ENDPOINT=$(gcloud container clusters describe ${{ steps.project.outputs.cluster_name }} \
-            --region ${{ steps.project.outputs.region }} \
-            --project ${{ steps.project.outputs.project_id }} \
-            --format="value(endpoint)")
-          echo "GKE Endpoint: $ENDPOINT"
-          echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
-
-          # Get credentials (this sets up kubeconfig)
+          # Get credentials with internal IP (this sets up kubeconfig)
           gcloud container clusters get-credentials ${{ steps.project.outputs.cluster_name }} \
             --region ${{ steps.project.outputs.region }} \
             --project ${{ steps.project.outputs.project_id }} \
@@ -156,19 +148,20 @@ jobs:
 
           echo "Kubeconfig configured for: ${{ steps.project.outputs.cluster_name }}"
 
-          # Show current kubeconfig server
-          echo "=== Kubeconfig server ==="
-          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
-          echo ""
+          # Extract the internal endpoint from kubeconfig (e.g., https://172.16.0.2 -> 172.16.0.2)
+          INTERNAL_ENDPOINT=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' | sed 's|https://||')
+          echo "Internal GKE Endpoint: $INTERNAL_ENDPOINT"
+          echo "endpoint=$INTERNAL_ENDPOINT" >> $GITHUB_OUTPUT
 
       - name: Setup kubectl proxy via Tailscale
         run: |
           ENDPOINT="${{ steps.gke-creds.outputs.endpoint }}"
+          echo "Setting up proxy to internal endpoint: $ENDPOINT"
 
           # Create a simple TCP proxy script using socat
           sudo apt-get update && sudo apt-get install -y socat
 
-          # Start socat proxy that forwards to the GKE endpoint via tailscale nc
+          # Start socat proxy that forwards to the GKE internal endpoint via tailscale nc
           # This creates a local proxy on port 6443 that routes through Tailscale
           cat > /tmp/ts-proxy.sh << 'PROXY_SCRIPT'
           #!/bin/bash
@@ -186,7 +179,7 @@ jobs:
 
           # Verify proxy is running
           if kill -0 $(cat /tmp/proxy.pid) 2>/dev/null; then
-            echo "✅ Tailscale proxy started on localhost:6443"
+            echo "✅ Tailscale proxy started on localhost:6443 -> $ENDPOINT:443"
           else
             echo "❌ Failed to start proxy"
             cat /tmp/proxy.log
@@ -406,14 +399,6 @@ jobs:
       - name: Get GKE Credentials and Setup Proxy
         id: gke-creds
         run: |
-          # Get the cluster endpoint
-          ENDPOINT=$(gcloud container clusters describe ${{ steps.project.outputs.cluster_name }} \
-            --region ${{ steps.project.outputs.region }} \
-            --project ${{ steps.project.outputs.project_id }} \
-            --format="value(endpoint)")
-          echo "GKE Endpoint: $ENDPOINT"
-          echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
-
           # Get credentials with internal IP
           gcloud container clusters get-credentials ${{ steps.project.outputs.cluster_name }} \
             --region ${{ steps.project.outputs.region }} \
@@ -422,9 +407,15 @@ jobs:
 
           echo "Kubeconfig configured for: ${{ steps.project.outputs.cluster_name }}"
 
+          # Extract the internal endpoint from kubeconfig
+          INTERNAL_ENDPOINT=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' | sed 's|https://||')
+          echo "Internal GKE Endpoint: $INTERNAL_ENDPOINT"
+          echo "endpoint=$INTERNAL_ENDPOINT" >> $GITHUB_OUTPUT
+
       - name: Setup kubectl proxy via Tailscale
         run: |
           ENDPOINT="${{ steps.gke-creds.outputs.endpoint }}"
+          echo "Setting up proxy to internal endpoint: $ENDPOINT"
 
           # Install socat for TCP proxying
           sudo apt-get update && sudo apt-get install -y socat
@@ -446,7 +437,7 @@ jobs:
 
           # Verify proxy is running
           if kill -0 $(cat /tmp/proxy.pid) 2>/dev/null; then
-            echo "✅ Tailscale proxy started on localhost:6443"
+            echo "✅ Tailscale proxy started on localhost:6443 -> $ENDPOINT:443"
           else
             echo "❌ Failed to start proxy"
             cat /tmp/proxy.log
