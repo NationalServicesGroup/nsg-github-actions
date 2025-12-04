@@ -108,34 +108,38 @@ jobs:
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
 
-      - name: Accept Tailscale Routes
+      - name: Enable Accept Routes
         run: |
-          sudo tailscale set --accept-routes
+          # Enable accept-routes
+          sudo tailscale set --accept-routes=true
+
+          # Give it a moment to update routes
+          sleep 5
+
+          # Show debug info
+          echo "=== Tailscale Debug Prefs ==="
+          tailscale debug prefs 2>/dev/null | head -20 || true
+
+          echo ""
+          echo "=== IP Routes ==="
+          ip route
+
+          echo ""
+          echo "=== Tailscale Status (detailed) ==="
+          tailscale status --peers
+
+          echo ""
+          echo "=== Tailscale ping to subnet router ==="
+          tailscale ping -c 3 100.100.128.108 || echo "Tailscale ping failed"
+
+          echo ""
+          echo "=== Regular ping to Tailscale peer ==="
+          ping -c 2 100.100.128.108 || echo "Cannot ping subnet router"
 
       - name: Install GKE Auth Plugin
         run: |
           gcloud components install gke-gcloud-auth-plugin --quiet
           echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
-
-      - name: Verify Tailscale Connection
-        run: |
-          echo "Tailscale status:"
-          tailscale status
-          echo ""
-          echo "Tailscale IP:"
-          tailscale ip -4
-          echo ""
-          echo "IP routes:"
-          ip route | grep -E "^10\.|^34\.|^35\." || echo "No matching routes"
-          echo ""
-          echo "Tailscale netcheck:"
-          tailscale netcheck
-          echo ""
-          echo "Testing ping to subnet router (stage-k8s-subnet-1):"
-          ping -c 2 100.100.128.108 || echo "Ping failed"
-          echo ""
-          echo "Testing route to GKE control plane (34.29.70.142):"
-          ping -c 2 34.29.70.142 || echo "Ping to GKE failed"
 
       - name: Get GKE Credentials
         run: |
