@@ -108,46 +108,115 @@ jobs:
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
 
-      - name: Enable Accept Routes
+      - name: Configure Tailscale for Subnet Routing
         run: |
-          # Enable accept-routes
+          # Enable accept-routes and stateful filtering
           sudo tailscale set --accept-routes=true
 
-          # Give it a moment to update routes
+          # Wait for routes to propagate
           sleep 5
 
-          # Show debug info
-          echo "=== Tailscale Debug Prefs ==="
-          tailscale debug prefs 2>/dev/null | head -20 || true
+          # Debug info
+          echo "=== Tailscale Status ==="
+          tailscale status
 
           echo ""
-          echo "=== IP Routes ==="
-          ip route
+          echo "=== Tailscale IP Info ==="
+          tailscale ip -4
 
           echo ""
-          echo "=== Tailscale Status (detailed) ==="
-          tailscale status --peers
+          echo "=== IP Routes (table 52 - Tailscale) ==="
+          ip route show table 52 2>/dev/null || echo "Table 52 not found"
 
           echo ""
-          echo "=== Tailscale ping to subnet router ==="
-          tailscale ping -c 3 100.100.128.108 || echo "Tailscale ping failed"
-
-          echo ""
-          echo "=== Regular ping to Tailscale peer ==="
-          ping -c 2 100.100.128.108 || echo "Cannot ping subnet router"
+          echo "=== IP Routes (main) ==="
+          ip route | head -20
 
       - name: Install GKE Auth Plugin
         run: |
           gcloud components install gke-gcloud-auth-plugin --quiet
           echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
-      - name: Get GKE Credentials
+      - name: Get GKE Credentials and Setup Proxy
+        id: gke-creds
         run: |
+          # Get the cluster endpoint
+          ENDPOINT=$(gcloud container clusters describe ${{ steps.project.outputs.cluster_name }} \
+            --region ${{ steps.project.outputs.region }} \
+            --project ${{ steps.project.outputs.project_id }} \
+            --format="value(endpoint)")
+          echo "GKE Endpoint: $ENDPOINT"
+          echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
+
+          # Get credentials (this sets up kubeconfig)
           gcloud container clusters get-credentials ${{ steps.project.outputs.cluster_name }} \
             --region ${{ steps.project.outputs.region }} \
-            --project ${{ steps.project.outputs.project_id }}
-          echo "Connected to GKE cluster: ${{ steps.project.outputs.cluster_name }}"
-          kubectl cluster-info
+            --project ${{ steps.project.outputs.project_id }} \
+            --internal-ip
+
+          echo "Kubeconfig configured for: ${{ steps.project.outputs.cluster_name }}"
+
+          # Show current kubeconfig server
+          echo "=== Kubeconfig server ==="
+          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+          echo ""
+
+      - name: Setup kubectl proxy via Tailscale
+        run: |
+          ENDPOINT="${{ steps.gke-creds.outputs.endpoint }}"
+
+          # Create a simple TCP proxy script using socat
+          sudo apt-get update && sudo apt-get install -y socat
+
+          # Start socat proxy that forwards to the GKE endpoint via tailscale nc
+          # This creates a local proxy on port 6443 that routes through Tailscale
+          cat > /tmp/ts-proxy.sh << 'PROXY_SCRIPT'
+          #!/bin/bash
+          ENDPOINT="$1"
+          while true; do
+            socat TCP-LISTEN:6443,reuseaddr,fork EXEC:"tailscale nc $ENDPOINT 443"
+          done
+          PROXY_SCRIPT
+          chmod +x /tmp/ts-proxy.sh
+
+          # Start the proxy in background
+          nohup /tmp/ts-proxy.sh "$ENDPOINT" > /tmp/proxy.log 2>&1 &
+          echo $! > /tmp/proxy.pid
+          sleep 2
+
+          # Verify proxy is running
+          if kill -0 $(cat /tmp/proxy.pid) 2>/dev/null; then
+            echo "✅ Tailscale proxy started on localhost:6443"
+          else
+            echo "❌ Failed to start proxy"
+            cat /tmp/proxy.log
+            exit 1
+          fi
+
+          # Update kubeconfig to use local proxy
+          kubectl config set-cluster $(kubectl config current-context) --server=https://127.0.0.1:6443
+
+          # Disable TLS verification for the proxy (the connection to GKE is still TLS)
+          kubectl config set-cluster $(kubectl config current-context) --insecure-skip-tls-verify=true
+
+          echo "=== Updated kubeconfig ==="
+          kubectl config view --minify
+
+      - name: Test Kubectl Connection
+        run: |
+          echo "Testing kubectl connection through Tailscale proxy..."
+
+          # Test with timeout
+          timeout 30 kubectl cluster-info || {
+            echo "❌ kubectl cluster-info failed"
+            echo "=== Proxy logs ==="
+            cat /tmp/proxy.log 2>/dev/null || true
+            exit 1
+          }
+
+          echo ""
+          echo "✅ Successfully connected to GKE cluster via Tailscale!"
+          kubectl get nodes --no-headers | head -3
 
       - name: Initialize Terraform
         working-directory: ${{ inputs.working_directory }}
@@ -322,26 +391,80 @@ jobs:
           oauth-secret: ${{ secrets.ts_oauth_secret }}
           tags: tag:cicd
 
-      - name: Accept Tailscale Routes
+      - name: Configure Tailscale for Subnet Routing
         run: |
-          sudo tailscale set --accept-routes
+          sudo tailscale set --accept-routes=true
+          sleep 5
+          echo "=== Tailscale Status ==="
+          tailscale status
 
       - name: Install GKE Auth Plugin
         run: |
           gcloud components install gke-gcloud-auth-plugin --quiet
           echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
-      - name: Verify Tailscale Connection
+      - name: Get GKE Credentials and Setup Proxy
+        id: gke-creds
         run: |
-          echo "Tailscale status:"
-          tailscale status
+          # Get the cluster endpoint
+          ENDPOINT=$(gcloud container clusters describe ${{ steps.project.outputs.cluster_name }} \
+            --region ${{ steps.project.outputs.region }} \
+            --project ${{ steps.project.outputs.project_id }} \
+            --format="value(endpoint)")
+          echo "GKE Endpoint: $ENDPOINT"
+          echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
 
-      - name: Get GKE Credentials
-        run: |
+          # Get credentials with internal IP
           gcloud container clusters get-credentials ${{ steps.project.outputs.cluster_name }} \
             --region ${{ steps.project.outputs.region }} \
-            --project ${{ steps.project.outputs.project_id }}
-          echo "Connected to GKE cluster: ${{ steps.project.outputs.cluster_name }}"
+            --project ${{ steps.project.outputs.project_id }} \
+            --internal-ip
+
+          echo "Kubeconfig configured for: ${{ steps.project.outputs.cluster_name }}"
+
+      - name: Setup kubectl proxy via Tailscale
+        run: |
+          ENDPOINT="${{ steps.gke-creds.outputs.endpoint }}"
+
+          # Install socat for TCP proxying
+          sudo apt-get update && sudo apt-get install -y socat
+
+          # Create proxy script
+          cat > /tmp/ts-proxy.sh << 'PROXY_SCRIPT'
+          #!/bin/bash
+          ENDPOINT="$1"
+          while true; do
+            socat TCP-LISTEN:6443,reuseaddr,fork EXEC:"tailscale nc $ENDPOINT 443"
+          done
+          PROXY_SCRIPT
+          chmod +x /tmp/ts-proxy.sh
+
+          # Start the proxy in background
+          nohup /tmp/ts-proxy.sh "$ENDPOINT" > /tmp/proxy.log 2>&1 &
+          echo $! > /tmp/proxy.pid
+          sleep 2
+
+          # Verify proxy is running
+          if kill -0 $(cat /tmp/proxy.pid) 2>/dev/null; then
+            echo "✅ Tailscale proxy started on localhost:6443"
+          else
+            echo "❌ Failed to start proxy"
+            cat /tmp/proxy.log
+            exit 1
+          fi
+
+          # Update kubeconfig to use local proxy
+          kubectl config set-cluster $(kubectl config current-context) --server=https://127.0.0.1:6443
+          kubectl config set-cluster $(kubectl config current-context) --insecure-skip-tls-verify=true
+
+      - name: Test Kubectl Connection
+        run: |
+          timeout 30 kubectl cluster-info || {
+            echo "❌ kubectl connection failed"
+            cat /tmp/proxy.log 2>/dev/null || true
+            exit 1
+          }
+          echo "✅ Connected to GKE cluster via Tailscale"
 
       - name: Initialize Terraform
         working-directory: ${{ inputs.working_directory }}
