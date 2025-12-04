@@ -110,13 +110,22 @@ jobs:
 
       - name: Configure Tailscale for Subnet Routing
         run: |
-          # Enable accept-routes and stateful filtering
+          # Enable accept-routes
           sudo tailscale set --accept-routes=true
 
-          # Wait for routes to propagate
-          sleep 5
+          # Wait for Tailscale to fully initialize and routes to propagate
+          echo "Waiting for Tailscale routes to be ready..."
+          for i in {1..30}; do
+            if ip route show table 52 2>/dev/null | grep -q "dev tailscale0"; then
+              echo "✅ Tailscale routes ready after ${i} seconds"
+              break
+            fi
+            echo "Waiting for routes... ($i/30)"
+            sleep 1
+          done
 
           # Debug info
+          echo ""
           echo "=== Tailscale Status ==="
           tailscale status
 
@@ -126,7 +135,7 @@ jobs:
 
           echo ""
           echo "=== IP Routes (table 52 - Tailscale) ==="
-          ip route show table 52 2>/dev/null || echo "Table 52 not found"
+          ip route show table 52 2>/dev/null || echo "Table 52 not found yet"
 
           echo ""
           echo "=== IP Routes (main) ==="
@@ -155,23 +164,42 @@ jobs:
       - name: Test Kubectl Connection
         run: |
           echo "Testing kubectl connection via Tailscale..."
-          echo "Routes in Tailscale table 52:"
-          ip route show table 52 | grep -E "^34\." || echo "No 34.x.x.x routes found"
+          ENDPOINT="${{ steps.gke-creds.outputs.endpoint }}"
 
-          # Test with timeout
-          timeout 30 kubectl cluster-info || {
-            echo "❌ kubectl cluster-info failed"
-            echo ""
-            echo "Trying to debug connectivity..."
-            ENDPOINT="${{ steps.gke-creds.outputs.endpoint }}"
-            echo "Testing tailscale nc to $ENDPOINT:443..."
-            timeout 5 tailscale nc "$ENDPOINT" 443 </dev/null && echo "tailscale nc succeeded" || echo "tailscale nc failed"
-            exit 1
-          }
+          # Verify route exists for the endpoint
+          echo "Checking route for $ENDPOINT..."
+          for i in {1..10}; do
+            if ip route show table 52 2>/dev/null | grep -q "$ENDPOINT"; then
+              echo "✅ Route for $ENDPOINT found in table 52"
+              break
+            fi
+            echo "Waiting for route to $ENDPOINT... ($i/10)"
+            sleep 2
+          done
 
           echo ""
-          echo "✅ Successfully connected to GKE cluster via Tailscale!"
-          kubectl get nodes --no-headers | head -3
+          echo "Routes in Tailscale table 52 (34.x.x.x):"
+          ip route show table 52 2>/dev/null | grep -E "^34\." || echo "No 34.x.x.x routes found"
+
+          # Test kubectl with retries
+          echo ""
+          echo "Testing kubectl cluster-info..."
+          for attempt in {1..3}; do
+            if timeout 30 kubectl cluster-info; then
+              echo ""
+              echo "✅ Successfully connected to GKE cluster via Tailscale!"
+              kubectl get nodes --no-headers | head -3
+              exit 0
+            fi
+            echo "Attempt $attempt failed, retrying in 5 seconds..."
+            sleep 5
+          done
+
+          echo "❌ kubectl cluster-info failed after 3 attempts"
+          echo ""
+          echo "Debug: Testing tailscale nc to $ENDPOINT:443..."
+          timeout 5 tailscale nc "$ENDPOINT" 443 </dev/null && echo "tailscale nc succeeded" || echo "tailscale nc failed"
+          exit 1
 
       - name: Initialize Terraform
         working-directory: ${{ inputs.working_directory }}
