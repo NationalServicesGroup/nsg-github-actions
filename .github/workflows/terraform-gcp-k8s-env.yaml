@@ -204,16 +204,20 @@ jobs:
       - name: Initialize Terraform
         working-directory: ${{ inputs.working_directory }}
         run: |
-          # Copy backend config for environment
-          if [ -f "backends/backend.${{ inputs.environment }}.tf" ]; then
-            cp backends/backend.${{ inputs.environment }}.tf backend.tf
+          # Use existing init script if available, otherwise do manual init
+          if [ -f "scripts/terraform_init.sh" ]; then
+            chmod +x scripts/terraform_init.sh
+            ./scripts/terraform_init.sh ${{ inputs.environment }}
+          else
+            # Fallback: manual init
+            if [ -f "backends/backend.${{ inputs.environment }}.tf" ]; then
+              cp backends/backend.${{ inputs.environment }}.tf backend.tf
+            fi
+            if [ -f "variables/${{ inputs.environment }}.tfvars" ]; then
+              cp variables/${{ inputs.environment }}.tfvars terraform.tfvars
+            fi
+            terraform init
           fi
-
-          # Initialize Terraform
-          terraform init
-
-          # Select or create workspace
-          terraform workspace select ${{ inputs.environment }} || terraform workspace new ${{ inputs.environment }}
 
       - name: Terraform Plan
         id: plan
@@ -407,16 +411,20 @@ jobs:
       - name: Initialize Terraform
         working-directory: ${{ inputs.working_directory }}
         run: |
-          # Copy backend config for environment
-          if [ -f "backends/backend.${{ inputs.environment }}.tf" ]; then
-            cp backends/backend.${{ inputs.environment }}.tf backend.tf
+          # Use existing init script if available, otherwise do manual init
+          if [ -f "scripts/terraform_init.sh" ]; then
+            chmod +x scripts/terraform_init.sh
+            ./scripts/terraform_init.sh ${{ inputs.environment }}
+          else
+            # Fallback: manual init
+            if [ -f "backends/backend.${{ inputs.environment }}.tf" ]; then
+              cp backends/backend.${{ inputs.environment }}.tf backend.tf
+            fi
+            if [ -f "variables/${{ inputs.environment }}.tfvars" ]; then
+              cp variables/${{ inputs.environment }}.tfvars terraform.tfvars
+            fi
+            terraform init
           fi
-
-          # Initialize Terraform
-          terraform init
-
-          # Select workspace
-          terraform workspace select ${{ inputs.environment }}
 
       - name: Download Plan
         uses: actions/download-artifact@v4
