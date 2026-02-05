@@ -59,7 +59,9 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         VENV_PATH="$(pwd)/.venv"
-        uv venv ${VENV_PATH}
+        if [ ! -d "${VENV_PATH}" ]; then
+          uv venv ${VENV_PATH}
+        fi
         uv sync
         # Use absolute path for virtual environment
         echo "VIRTUAL_ENV=${VENV_PATH}" >> $GITHUB_ENV
