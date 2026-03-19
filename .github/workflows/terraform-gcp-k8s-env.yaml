@@ -286,6 +286,10 @@ jobs:
             ${{ inputs.working_directory }}/plan_output.txt
           retention-days: 1
 
+      - name: Logout Tailscale
+        if: always()
+        run: tailscale logout
+
   manual-approval:
     name: Manual Approval
     runs-on: ubuntu-latest
@@ -437,3 +441,7 @@ jobs:
         run: |
           terraform apply -auto-approve tfplan
           echo "✅ Successfully applied K8s infrastructure changes to ${{ inputs.environment }}"
+
+      - name: Logout Tailscale
+        if: always()
+        run: tailscale logout
