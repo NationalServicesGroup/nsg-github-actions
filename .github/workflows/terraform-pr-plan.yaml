@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Terraform
         uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
@@ -78,7 +78,7 @@ jobs:
         continue-on-error: true
 
       - name: Comment PR with Plan
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         if: github.event_name == 'pull_request'
         with:
           script: |

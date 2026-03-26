@@ -79,7 +79,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Terraform
         uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
@@ -132,7 +132,7 @@ jobs:
           fi
 
       - name: Comment PR with Plan
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         if: github.event_name == 'pull_request'
         with:
           github-token: ${{ secrets.pat_token }}
@@ -168,7 +168,7 @@ jobs:
 
       - name: Upload Plan Artifacts
         if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tfplan-${{ matrix.environment }}
           path: |
@@ -186,7 +186,7 @@ jobs:
 
     steps:
       - name: Download all plans
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: plans/
 
@@ -249,7 +249,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Terraform
         uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
@@ -282,7 +282,7 @@ jobs:
           working_directory: ${{ inputs.working_directory }}
 
       - name: Download Plan
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tfplan-${{ matrix.environment }}
           path: ${{ inputs.working_directory }}

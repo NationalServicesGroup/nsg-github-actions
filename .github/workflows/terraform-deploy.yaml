@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Terraform
         uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
@@ -66,7 +66,7 @@ jobs:
           exit 0
 
       - name: Upload Plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tfplan-${{ inputs.environment }}
           path: ${{ inputs.working_directory }}/tfplan
@@ -81,7 +81,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Terraform
         uses: NationalServicesGroup/nsg-github-actions/install-terraform@main
@@ -101,7 +101,7 @@ jobs:
           working_directory: ${{ inputs.working_directory }}
 
       - name: Download Plan
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tfplan-${{ inputs.environment }}
           path: ${{ inputs.working_directory }}
