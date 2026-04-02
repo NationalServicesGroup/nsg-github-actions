@@ -69,7 +69,7 @@ jobs:
       - name: Terraform Plan
         working-directory: ${{ inputs.working_directory }}
         run: |
-          terraform plan -out=tfplan
+          terraform plan -lock-timeout=300s -out=tfplan
 
       - name: Upload Plan
         uses: actions/upload-artifact@v7
@@ -118,4 +118,4 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ inputs.working_directory }}
         run: |
-          terraform apply -auto-approve tfplan
+          terraform apply -lock-timeout=300s -auto-approve tfplan

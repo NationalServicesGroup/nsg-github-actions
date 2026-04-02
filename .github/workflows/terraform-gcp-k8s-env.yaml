@@ -225,7 +225,7 @@ jobs:
         run: |
           # Run plan and capture output
           set +e
-          terraform plan \
+          terraform plan -lock-timeout=300s \\
             -var-file="${{ inputs.tfvars_directory }}/${{ inputs.environment }}.tfvars" \
             -detailed-exitcode -no-color -out=tfplan 2>&1 | tee plan_output.txt
           exitcode=$?
@@ -439,7 +439,7 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ inputs.working_directory }}
         run: |
-          terraform apply -auto-approve tfplan
+          terraform apply -lock-timeout=300s -auto-approve tfplan
           echo "✅ Successfully applied K8s infrastructure changes to ${{ inputs.environment }}"
 
       - name: Logout Tailscale

@@ -35,4 +35,4 @@ runs:
       working-directory: ${{ inputs.working_directory }}
       run: |
         echo "Running Terraform plan for ${{ inputs.environment }}..."
-        terraform plan -no-color
+        terraform plan -lock-timeout=300s -no-color

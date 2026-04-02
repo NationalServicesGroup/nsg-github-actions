@@ -117,7 +117,7 @@ jobs:
         run: |
           # Run plan and capture output
           set +e
-          terraform plan -detailed-exitcode -no-color -out=tfplan 2>&1 | tee plan_output.txt
+          terraform plan -lock-timeout=300s -detailed-exitcode -no-color -out=tfplan 2>&1 | tee plan_output.txt
           exitcode=$?
           set -e
 
@@ -290,5 +290,5 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ inputs.working_directory }}
         run: |
-          terraform apply -auto-approve tfplan
+          terraform apply -lock-timeout=300s -auto-approve tfplan
           echo "✅ Successfully applied changes to ${{ matrix.environment }}"

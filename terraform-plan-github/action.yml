@@ -70,7 +70,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
-        terraform plan -input=false -out=tfplan -no-color | tee plan_output.txt
+        terraform plan -lock-timeout=300s -input=false -out=tfplan -no-color | tee plan_output.txt
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
         GITHUB_OWNER: ${{ inputs.github_owner }}

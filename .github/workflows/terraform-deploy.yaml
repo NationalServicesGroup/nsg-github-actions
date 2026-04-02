@@ -61,7 +61,7 @@ jobs:
         id: plan
         working-directory: ${{ inputs.working_directory }}
         run: |
-          terraform plan -detailed-exitcode -out=tfplan || export exitcode=$?
+          terraform plan -lock-timeout=300s -detailed-exitcode -out=tfplan || export exitcode=$?
           echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
           exit 0
 
@@ -109,4 +109,4 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ inputs.working_directory }}
         run: |
-          terraform apply -auto-approve tfplan
+          terraform apply -lock-timeout=300s -auto-approve tfplan

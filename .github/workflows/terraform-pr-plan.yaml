@@ -74,7 +74,7 @@ jobs:
         id: plan
         working-directory: ${{ inputs.working_directory }}
         run: |
-          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+          terraform plan -lock-timeout=300s -no-color -out=tfplan 2>&1 | tee plan.txt
         continue-on-error: true
 
       - name: Strip plan noise
