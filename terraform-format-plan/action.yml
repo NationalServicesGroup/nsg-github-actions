@@ -1,5 +1,5 @@
 name: "Format Terraform Plan"
-description: "Strips noise from terraform plan, keeps only changes, and truncates for GitHub outputs"
+description: "Formats and truncates terraform plan for GitHub outputs and summaries"
 
 inputs:
   plan_file:
@@ -8,11 +8,11 @@ inputs:
   max_length:
     description: "Maximum length before truncation"
     required: false
-    default: "55000"
+    default: "60000"
 
 outputs:
   plan_formatted:
-    description: "Formatted plan output (changes only)"
+    description: "Formatted and truncated plan output"
     value: ${{ steps.format.outputs.plan_formatted }}
   plan_truncated:
     description: "Whether the plan was truncated"
@@ -25,52 +25,39 @@ runs:
       id: format
       shell: bash
       run: |
-        # Strip refreshing/reading noise, keep only the changes
-        PLAN_CHANGES=$(sed -n '/Terraform used the selected providers/,$ p' "${{ inputs.plan_file }}")
-
-        # Fallback: if that marker isn't found, try "Terraform will perform"
-        if [ -z "$PLAN_CHANGES" ]; then
-          PLAN_CHANGES=$(sed -n '/Terraform will perform the following actions/,$ p' "${{ inputs.plan_file }}")
-        fi
-
-        # Fallback: if still empty, try "No changes" or "Plan:" summary
-        if [ -z "$PLAN_CHANGES" ]; then
-          PLAN_CHANGES=$(grep -E '(No changes|Plan:|Error|Warning)' "${{ inputs.plan_file }}" || true)
-        fi
-
-        # Final fallback: strip Refreshing/Reading lines manually
-        if [ -z "$PLAN_CHANGES" ]; then
-          PLAN_CHANGES=$(grep -v -E '(Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after)' "${{ inputs.plan_file }}" || true)
-        fi
-
+        PLAN_CONTENT="$(cat ${{ inputs.plan_file }})"
+        PLAN_LENGTH=${#PLAN_CONTENT}
         MAX_LENGTH=${{ inputs.max_length }}
-        PLAN_LENGTH=${#PLAN_CHANGES}
-        WAS_TRUNCATED="false"
 
-        if [ "$PLAN_LENGTH" -gt "$MAX_LENGTH" ]; then
-          PLAN_CHANGES="${PLAN_CHANGES:0:$MAX_LENGTH}"
-          WAS_TRUNCATED="true"
+        if [ $PLAN_LENGTH -gt $MAX_LENGTH ]; then
+          PLAN_TRUNCATED="${PLAN_CONTENT:0:$MAX_LENGTH}"
+          echo "was_truncated=true" >> $GITHUB_OUTPUT
+
+          {
+            echo 'plan_formatted<<PLAN_EOF'
+            echo "$PLAN_TRUNCATED"
+            echo ""
+            echo "!!!!!! PLAN WAS TRUNCATED !!!!!!"
+            echo "Original length: $PLAN_LENGTH characters"
+            echo "View full plan in workflow logs"
+            echo 'PLAN_EOF'
+          } >> $GITHUB_OUTPUT
+        else
+          echo "was_truncated=false" >> $GITHUB_OUTPUT
+          {
+            echo 'plan_formatted<<PLAN_EOF'
+            echo "$PLAN_CONTENT"
+            echo 'PLAN_EOF'
+          } >> $GITHUB_OUTPUT
         fi
 
-        echo "was_truncated=${WAS_TRUNCATED}" >> $GITHUB_OUTPUT
-
-        {
-          echo 'plan_formatted<<PLAN_EOF'
-          echo "$PLAN_CHANGES"
-          if [ "$WAS_TRUNCATED" == "true" ]; then
-            echo ""
-            echo "... (truncated — view full plan in workflow logs)"
-          fi
-          echo 'PLAN_EOF'
-        } >> $GITHUB_OUTPUT
-
-        # Step summary always gets the full cleaned plan
-        echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
+        # Add to step summary
+        echo "## Terraform Plan 📖" >> $GITHUB_STEP_SUMMARY
         echo '```hcl' >> $GITHUB_STEP_SUMMARY
-        echo "$PLAN_CHANGES" >> $GITHUB_STEP_SUMMARY
+        cat ${{ inputs.plan_file }} >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
 
-        if [ "$WAS_TRUNCATED" == "true" ]; then
+        if [ "${{ steps.format.outputs.was_truncated }}" == "true" ]; then
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> Plan was truncated in PR comment. Full plan available in workflow logs." >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Plan output was truncated in artifacts. Full plan shown above." >> $GITHUB_STEP_SUMMARY
         fi
