@@ -105,12 +105,6 @@ jobs:
           script: |
             const fs = require('fs');
             const plan = fs.readFileSync(`${process.env.WORK_DIR}/plan_cleaned.txt`, 'utf8');
-            const maxLength = 55000;
-            let displayPlan = plan;
-
-            if (plan.length > maxLength) {
-              displayPlan = plan.substring(0, maxLength) + '\n\n... (truncated — view full plan in workflow logs)';
-            }
 
             const body = [
               `### Terraform Plan: \`${process.env.ENVIRONMENT}\``,
@@ -119,7 +113,7 @@ jobs:
               '<summary>Show Plan</summary>',
               '',
               '```hcl',
-              displayPlan,
+              plan,
               '```',
               '',
               '</details>',

@@ -35,15 +35,6 @@ runs:
           PLAN_CHANGES=$(grep -v -E '(Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after)' "${{ inputs.plan_file }}" || true)
         fi
 
-        # Truncate if needed (leave room for markdown wrapper in PR comment)
-        MAX_LENGTH=55000
-        if [ ${#PLAN_CHANGES} -gt $MAX_LENGTH ]; then
-          PLAN_CHANGES="${PLAN_CHANGES:0:$MAX_LENGTH}"
-          PLAN_CHANGES="${PLAN_CHANGES}
-
-... (truncated — view full plan in workflow logs)"
-        fi
-
         echo "$PLAN_CHANGES" > formatted_plan.txt
 
         # Step summary

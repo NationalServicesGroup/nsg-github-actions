@@ -1,22 +1,15 @@
 name: "Format Terraform Plan"
-description: "Strips noise from terraform plan, keeps only changes, and truncates for GitHub outputs"
+description: "Strips noise from terraform plan, keeps only actual changes"
 
 inputs:
   plan_file:
     description: "Path to the plan output text file"
     required: true
-  max_length:
-    description: "Maximum length before truncation"
-    required: false
-    default: "55000"
 
 outputs:
   plan_formatted:
     description: "Formatted plan output (changes only)"
     value: ${{ steps.format.outputs.plan_formatted }}
-  plan_truncated:
-    description: "Whether the plan was truncated"
-    value: ${{ steps.format.outputs.was_truncated }}
 
 runs:
   using: "composite"
@@ -43,34 +36,14 @@ runs:
           PLAN_CHANGES=$(grep -v -E '(Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after)' "${{ inputs.plan_file }}" || true)
         fi
 
-        MAX_LENGTH=${{ inputs.max_length }}
-        PLAN_LENGTH=${#PLAN_CHANGES}
-        WAS_TRUNCATED="false"
-
-        if [ "$PLAN_LENGTH" -gt "$MAX_LENGTH" ]; then
-          PLAN_CHANGES="${PLAN_CHANGES:0:$MAX_LENGTH}"
-          WAS_TRUNCATED="true"
-        fi
-
-        echo "was_truncated=${WAS_TRUNCATED}" >> $GITHUB_OUTPUT
-
         {
           echo 'plan_formatted<<PLAN_EOF'
           echo "$PLAN_CHANGES"
-          if [ "$WAS_TRUNCATED" == "true" ]; then
-            echo ""
-            echo "... (truncated — view full plan in workflow logs)"
-          fi
           echo 'PLAN_EOF'
         } >> $GITHUB_OUTPUT
 
-        # Step summary always gets the full cleaned plan
+        # Step summary
         echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
         echo '```hcl' >> $GITHUB_STEP_SUMMARY
         echo "$PLAN_CHANGES" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-
-        if [ "$WAS_TRUNCATED" == "true" ]; then
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> Plan was truncated in PR comment. Full plan available in workflow logs." >> $GITHUB_STEP_SUMMARY
-        fi
