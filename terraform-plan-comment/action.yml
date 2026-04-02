@@ -1,5 +1,5 @@
 name: "Comment Terraform Plan on PR"
-description: "Formats terraform plan output and comments on PR (updates existing comment)"
+description: "Formats terraform plan output (changes only) and comments on PR (updates existing comment)"
 
 inputs:
   plan_file:
@@ -20,29 +20,40 @@ runs:
       id: format-plan
       shell: bash
       run: |
-        PLAN_CONTENT="$(cat ${{ inputs.plan_file }})"
-        PLAN_TRUNCATED="${PLAN_CONTENT:0:60000}"
+        # Strip refreshing/reading noise, keep only the changes
+        PLAN_CHANGES=$(sed -n '/Terraform used the selected providers/,$ p' "${{ inputs.plan_file }}")
 
-        # Save formatted plan to file for PR comment
-        {
-          echo "$PLAN_TRUNCATED"
-          if [ ${#PLAN_CONTENT} -gt 60000 ]; then
-            echo ""
-            echo "!!!!!! PLAN WAS TRUNCATED !!!!!!"
-            echo "View full plan in workflow logs"
-          fi
-        } > formatted_plan.txt
+        if [ -z "$PLAN_CHANGES" ]; then
+          PLAN_CHANGES=$(sed -n '/Terraform will perform the following actions/,$ p' "${{ inputs.plan_file }}")
+        fi
 
-        # Add to step summary
-        echo "## Terraform Plan 📖" >> $GITHUB_STEP_SUMMARY
+        if [ -z "$PLAN_CHANGES" ]; then
+          PLAN_CHANGES=$(grep -E '(No changes|Plan:|Error|Warning)' "${{ inputs.plan_file }}" || true)
+        fi
+
+        if [ -z "$PLAN_CHANGES" ]; then
+          PLAN_CHANGES=$(grep -v -E '(Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after)' "${{ inputs.plan_file }}" || true)
+        fi
+
+        # Truncate if needed (leave room for markdown wrapper in PR comment)
+        MAX_LENGTH=55000
+        if [ ${#PLAN_CHANGES} -gt $MAX_LENGTH ]; then
+          PLAN_CHANGES="${PLAN_CHANGES:0:$MAX_LENGTH}"
+          PLAN_CHANGES="${PLAN_CHANGES}
+
+... (truncated — view full plan in workflow logs)"
+        fi
+
+        echo "$PLAN_CHANGES" > formatted_plan.txt
+
+        # Step summary
+        echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
         echo '```hcl' >> $GITHUB_STEP_SUMMARY
         cat formatted_plan.txt >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
 
     - name: Comment PR with Plan
       uses: actions/github-script@v7
-      env:
-        PLAN_CONTENT: ${{ steps.format-plan.outputs.formatted_plan }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -56,7 +67,7 @@ runs:
 
           const commitSha = context.payload.pull_request.head.sha;
           const commitUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}/commits/${commitSha}`;
-          const body = `## Terraform Plan 📖\n\nCommit: [${commitSha.substring(0, 7)}](${commitUrl})\n\n\`\`\`hcl\n${plan}\n\`\`\``;
+          const body = `## Terraform Plan\n\nCommit: [\`${commitSha.substring(0, 7)}\`](${commitUrl})\n\n<details>\n<summary>Show Plan</summary>\n\n\`\`\`hcl\n${plan}\n\`\`\`\n\n</details>`;
 
           const comments = await github.rest.issues.listComments({
             issue_number: context.issue.number,
@@ -65,7 +76,7 @@ runs:
           });
 
           const existingComment = comments.data.find(comment =>
-            comment.body.includes('## Terraform Plan 📖')
+            comment.body.includes('## Terraform Plan')
           );
 
           if (existingComment) {
