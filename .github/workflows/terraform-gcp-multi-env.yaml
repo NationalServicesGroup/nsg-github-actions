@@ -117,6 +117,7 @@ jobs:
         run: |
           # Run plan and capture output
           set +e
+          set -o pipefail
           terraform plan -lock-timeout=300s -detailed-exitcode -no-color -out=tfplan 2>&1 | tee plan_output.txt
           exitcode=$?
           set -e
