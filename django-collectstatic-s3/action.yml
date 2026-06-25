@@ -55,7 +55,11 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         echo "Running Django collectstatic..."
-        cp .bitbucket/.env.cicd .env
+        # Copy the CI env file into .env so Django settings can load. The guard
+        # keeps the step from aborting when a consuming repo doesn't ship one
+        # (Django's environ.Env.read_env() tolerates a missing .env, settings
+        # have defaults, and NSG_ENV/DJANGO_SETTINGS_MODULE are exported below).
+        [ -f .ci/.env.cicd ] && cp .ci/.env.cicd .env || true
         source .venv/bin/activate
 
         export DJANGO_STATIC_ROOT=$(pwd)/staticfiles/
