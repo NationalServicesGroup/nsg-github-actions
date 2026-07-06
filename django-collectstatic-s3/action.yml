@@ -7,7 +7,11 @@ inputs:
     required: false
     default: '.'
   django-settings:
-    description: 'Django settings module to use'
+    description: 'Django settings module to use (legacy; used only to derive NSG_ENV when nsg-env is not set)'
+    required: false
+    default: ''
+  nsg-env:
+    description: 'NSG_ENV value to run collectstatic under (e.g. live, stage, dev). Takes precedence over django-settings; leave empty to keep the legacy django-settings-based derivation.'
     required: false
     default: ''
   s3-bucket:
@@ -64,7 +68,9 @@ runs:
 
         export DJANGO_STATIC_ROOT=$(pwd)/staticfiles/
         export LOG_PATH=$(pwd)/logs/
-        export NSG_ENV="${{ inputs.django-settings == 'hge.settings.prod' && 'prod' || inputs.django-settings == 'hge.settings.stage' && 'stage' || inputs.django-settings == 'hge.settings.dev' && 'dev' || 'prod' }}"
+        # Prefer the explicit nsg-env input; fall back to deriving it from the
+        # django-settings module string for callers that predate nsg-env.
+        export NSG_ENV="${{ inputs.nsg-env != '' && inputs.nsg-env || (inputs.django-settings == 'hge.settings.prod' && 'prod' || inputs.django-settings == 'hge.settings.stage' && 'stage' || inputs.django-settings == 'hge.settings.dev' && 'dev' || 'prod') }}"
         export DJANGO_SETTINGS_MODULE=hge.settings
 
         echo "NSG_ENV: $NSG_ENV"
